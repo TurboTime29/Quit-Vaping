@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import HitSheet, { useReasons } from '../components/HitSheet'
 import ReasonPicker, { type PickMode } from '../components/ReasonPicker'
-import { BarChart, Settings as SettingsIcon } from '../components/Icons'
+import { CardTitle, Carousel, HomeHeader, Timer } from '../components/HomeParts'
 import {
-  TIMEFRAMES, compareWithYesterday, costPerPuff, countBetween, dailyLimit, dateKey, formatClock, formatDuration, formatHour, formatMoney,
+  TIMEFRAMES, compareWithYesterday, costPerPuff, countBetween, dailyLimit, dateKey, formatDuration, formatHour, formatMoney,
   formatStreak, lastNDays, longestStreak, parseDateKey, reasonStats, startOfDay, totalAvoided, type ReasonTimeframe,
 } from '../lib/analytics'
 import { healthProgress } from '../lib/health'
@@ -15,25 +15,6 @@ import ColdTurkeyHome, { PreQuitHome } from './ColdTurkeyHome'
 
 /** Red when fewer avoided than taken, green when more. */
 const avoidedColor = (avoided: number, taken: number) => (avoided < taken ? 'text-accent' : avoided === taken ? 'text-fg' : 'text-good')
-
-function Timer({ since }: { since: number }) {
-  const now = useNow(1000)
-  const parts = formatClock(now - since)
-  const units = ['DD', 'HH', 'MM', 'SS']
-  return (
-    <div className="mb-10 flex items-start justify-center" role="timer" aria-label="Time since last hit">
-      {parts.map((v, i) => (
-        <div key={units[i]} className="flex items-start">
-          {i > 0 && <span className="tabular text-[44px] leading-[56px] font-bold min-[400px]:text-5xl">:</span>}
-          <div className="flex w-[66px] flex-col items-center min-[400px]:w-[70px]">
-            <span className="tabular text-[44px] leading-[56px] font-bold min-[400px]:text-5xl">{v}</span>
-            <span className="tabular mt-0.5 text-xs text-muted">{units[i]}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function LimitBar() {
   const now = useNow(60_000)
@@ -91,8 +72,6 @@ function StatsRow() {
     </div>
   )
 }
-
-const CardTitle = ({ children }: { children: string }) => <h2 className="text-xs font-semibold tracking-widest text-muted">{children}</h2>
 
 function ReasonsCard() {
   const now = useNow(60_000)
@@ -267,36 +246,6 @@ function HealthCard() {
 
 const SLIDES = [ReasonsCard, WeekCard, TotalsCard, HealthCard]
 
-function Carousel() {
-  const ref = useRef<HTMLDivElement>(null)
-  const [index, setIndex] = useState(0)
-  const go = (i: number) => {
-    const el = ref.current
-    if (el) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' })
-  }
-  return (
-    <>
-      <div
-        ref={ref}
-        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto rounded-[20px]"
-        onScroll={(e) => setIndex(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
-      >
-        {SLIDES.map((Slide, i) => (
-          <section key={i} className="min-h-[265px] w-full shrink-0 snap-center snap-always overflow-hidden rounded-[20px] bg-card p-5" aria-roledescription="slide">
-            <Slide />
-          </section>
-        ))}
-      </div>
-      <div className="mt-2 mb-6 flex justify-center">
-        {SLIDES.map((_, i) => (
-          <button key={i} className="p-2" onClick={() => go(i)} aria-label={`Show card ${i + 1}`}>
-            <span className={`block size-2 rounded-full ${index === i ? 'bg-fg' : 'bg-muted opacity-30'}`} />
-          </button>
-        ))}
-      </div>
-    </>
-  )
-}
 
 export function GradualHome() {
   const navigate = useNavigate()
@@ -310,16 +259,7 @@ export function GradualHome() {
 
   return (
     <div className="safe-top safe-bottom mx-auto max-w-md">
-      <header className="flex items-start justify-between px-6 pt-4 pb-2">
-        <div>
-          <h1 className="text-[28px] leading-tight font-bold">Quit.</h1>
-          <p className="mt-0.5 text-[13px] text-muted">Do The Thing</p>
-        </div>
-        <div className="-mr-2 flex">
-          <button className="press rounded-full p-2 text-muted" onClick={() => navigate('/insights')} aria-label="Insights"><BarChart size={24} /></button>
-          <button className="press rounded-full p-2 text-muted" onClick={() => navigate('/settings')} aria-label="Settings"><SettingsIcon size={24} /></button>
-        </div>
-      </header>
+      <HomeHeader />
 
       <main className="px-6 pt-8 pb-4">
         {!profile!.settings.approach && (
@@ -328,8 +268,7 @@ export function GradualHome() {
             <div className="mt-0.5 text-sm text-muted">Quitting cold turkey? Switch to a home screen focused on time vape-free, health milestones and money saved. →</div>
           </Link>
         )}
-        <p className="mb-6 text-center text-sm font-semibold tracking-wider text-muted">TIME SINCE LAST HIT</p>
-        <Timer since={lastHit ?? profile!.journeyStart} />
+        <Timer label="TIME SINCE LAST HIT" since={lastHit ?? profile!.journeyStart} />
 
         {picking ? (
           <ReasonPicker mode={picking} onDone={() => setPicking(null)} onEarlier={() => { setPicking(null); setSheet('resisted') }} />
@@ -346,7 +285,7 @@ export function GradualHome() {
 
         <LimitBar />
         <StatsRow />
-        <Carousel />
+        <Carousel slides={SLIDES} />
       </main>
       {sheet && <HitSheet initialKind={sheet} onClose={() => setSheet(null)} />}
     </div>
