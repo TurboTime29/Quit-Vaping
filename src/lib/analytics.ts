@@ -25,19 +25,29 @@ export function daysBetween(a: number, b: number): number {
 }
 
 /**
- * Records that count: not deleted, and either generated backfill or logged on/after the journey start.
- * Records before the journey start are hidden rather than erased, so moving the start date back restores them.
- * Includes resisted cravings; use onlyHits() for hit statistics.
+ * Every record that is not deleted: backfill, hits logged before the quit date (pre-quit history) and after,
+ * and resisted cravings. Use onlyHits() for hit statistics and journeyHits() for progress since quitting.
  */
-export function visibleHits(hits: Hit[], profile: Profile | null): Hit[] {
-  const start = profile?.journeyStart ?? -Infinity
-  return hits.filter((h) => !h.deleted && (h.backfill || h.ts >= start))
+export function visibleHits(hits: Hit[]): Hit[] {
+  return hits.filter((h) => !h.deleted)
 }
 
 export const onlyHits = (visible: Hit[]) => visible.filter((h) => h.kind !== 'resisted')
 export const onlyWins = (visible: Hit[]) => visible.filter((h) => h.kind === 'resisted')
 /** Hits the user actually logged (no generated backfill). */
 export const realHits = (hits: Hit[]) => hits.filter((h) => !h.backfill)
+/** Hits logged on or after the journey start: what streaks, totals and "avoided" are about. */
+export const journeyHits = (hits: Hit[], profile: Profile | null) => realHits(hits).filter((h) => h.ts >= (profile?.journeyStart ?? -Infinity))
+export const isPreQuit = (h: Hit, profile: Profile | null) => !!profile && h.ts < profile.journeyStart
+
+/**
+ * A gradual plan that reaches zero by the target date: start at the current average and drop by the same amount
+ * each week (rounded up, so zero arrives on or before the target).
+ */
+export function taperToTarget(averagePerDay: number, startedAt: number, target: number): Taper {
+  const weeks = Math.max(1, Math.floor(daysBetween(startedAt, target) / 7))
+  return { startLimit: averagePerDay, weeklyDrop: Math.max(1, Math.ceil(averagePerDay / weeks)), startedAt }
+}
 
 export function lastHitTime(real: Hit[]): number | null {
   let max: number | null = null
@@ -86,10 +96,13 @@ export interface Baseline {
   days: number
 }
 
+/** Days of pre-quit history needed before it replaces the Average Puffs setting as the baseline. */
+export const MIN_BASELINE_DAYS = 7
+
 /**
  * The pre-quit daily rate that "avoided" and "saved" are measured against: hits recorded in up to 30 full days
  * before the journey start (backfilled or logged, never resisted cravings or deleted records), falling back to
- * the Average Puffs Per Day setting when there is no such history.
+ * the Average Puffs Per Day setting until that history covers at least a week.
  */
 export function preQuitBaseline(profile: Profile | null, allHits: Hit[], windowDays = 30): Baseline {
   const fallback: Baseline = { perDay: profile?.averagePuffsPerDay ?? 0, source: 'setting', days: 0 }
@@ -106,7 +119,8 @@ export function preQuitBaseline(profile: Profile | null, allHits: Hit[], windowD
   }
   if (!count) return fallback
   const days = daysBetween(first, end)
-  return days >= 1 ? { perDay: count / days, source: 'history', days } : fallback
+  // A few days of logging (often starting mid-day) is too little to measure a habit: keep the user's own estimate.
+  return days >= MIN_BASELINE_DAYS ? { perDay: count / days, source: 'history', days } : fallback
 }
 
 /** Hits a user would have taken since the journey began at their pre-quit rate, minus the ones they did take. */

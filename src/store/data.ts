@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { generateBackfill } from '../lib/analytics'
-import { normalizeSettings, type Hit, type Profile, type ProfileSettings, type SleepWindow, type ThemeMode } from '../types'
+import { normalizeSettings, type Approach, type Cost, type Hit, type Profile, type ProfileSettings, type SleepWindow, type Taper, type ThemeMode } from '../types'
 
 export interface NewHit {
   reason?: string
@@ -9,6 +9,16 @@ export interface NewHit {
   kind?: 'resisted'
   /** Defaults to now (for logging a missed hit earlier). */
   ts?: number
+}
+
+export interface JourneySetup {
+  averagePuffsPerDay: number
+  approach: Approach
+  /** Quit time (cold turkey) or when tracking starts (gradual). Defaults to now. */
+  journeyStart?: number
+  taper?: Taper | null
+  targetDate?: number | null
+  cost?: Cost | null
 }
 
 export interface DataState {
@@ -22,7 +32,7 @@ export interface DataState {
   /** Server timestamp of the newest row pulled, per signed-in user. */
   cursor: { userId: string; at: string } | null
 
-  startJourney: (averagePuffsPerDay: number) => void
+  startJourney: (setup: JourneySetup) => void
   updateProfile: (updates: Partial<Pick<Profile, 'averagePuffsPerDay' | 'journeyStart'>>) => void
   updateSettings: (updates: Partial<ProfileSettings>) => void
   /** Logs a hit or resisted craving and returns its id (for undo). */
@@ -72,8 +82,17 @@ export const useData = create<DataState>()(
       dirtyHits: {},
       cursor: null,
 
-      startJourney: (averagePuffsPerDay) =>
-        set({ profile: { averagePuffsPerDay, journeyStart: Date.now(), hasBackfilled: false, settings: normalizeSettings(null), updatedAt: Date.now() }, dirtyProfile: true }),
+      startJourney: ({ averagePuffsPerDay, approach, journeyStart, taper, targetDate, cost }) =>
+        set({
+          profile: {
+            averagePuffsPerDay,
+            journeyStart: journeyStart ?? Date.now(),
+            hasBackfilled: false,
+            settings: { ...normalizeSettings(null), approach, taper: taper ?? null, targetDate: targetDate ?? null, cost: cost ?? null },
+            updatedAt: Date.now(),
+          },
+          dirtyProfile: true,
+        }),
 
       updateProfile: (updates) =>
         set((s) => (s.profile ? { profile: { ...s.profile, ...updates, updatedAt: Date.now() }, dirtyProfile: true } : {})),
@@ -105,7 +124,8 @@ export const useData = create<DataState>()(
           if (!s.profile) return {}
           const now = Date.now()
           const sleep = sleepWindow ?? s.profile.settings.sleep
-          const fresh = generateBackfill(s.profile.journeyStart, s.profile.averagePuffsPerDay, now, Math.random, sleep)
+          // A future quit date: fill in the history before today; the user logs the days until quitting.
+          const fresh = generateBackfill(Math.min(s.profile.journeyStart, now), s.profile.averagePuffsPerDay, now, Math.random, sleep)
           const freshIds = new Set(fresh.map((h) => h.id))
           // Old backfill records not regenerated (different days or a lower average) become tombstones.
           const stale = s.hits.filter((h) => h.backfill && !h.deleted && !freshIds.has(h.id)).map((h) => ({ ...h, deleted: true, updatedAt: now }))

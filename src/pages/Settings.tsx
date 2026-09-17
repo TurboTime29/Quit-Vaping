@@ -5,11 +5,12 @@ import Sheet from '../components/Sheet'
 import { confirmDialog, toast } from '../components/Dialogs'
 import { ChevronDown, ChevronUp, Moon, Sun, X } from '../components/Icons'
 import PageHeader from '../components/PageHeader'
-import { costPerPuff, countBetween, dailyLimit, dateKey, formatMoney, nextLimitDrop, overnightHits, startOfDay } from '../lib/analytics'
+import { costPerPuff, countBetween, dailyLimit, dateKey, formatMoney, nextLimitDrop, overnightHits, startOfDay, taperToTarget } from '../lib/analytics'
 import { useHitData } from '../lib/hooks'
 import { currentSubscription, disablePush, enablePush, isStandalone, pushAvailability, sendTestNotification } from '../lib/push'
 import { deleteAccount, deleteCloudData, syncEnabled, useSession } from '../lib/sync'
 import { exportBackup, useData, type Backup } from '../store/data'
+import { approachOf, type Approach } from '../types'
 
 function Card({ title, id, action, children }: { title: string; id?: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -52,8 +53,56 @@ const labelClass = 'mb-2 block text-sm font-semibold text-muted'
 const timeOf = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 const wholeNumber = (v: string, max = 5000) => (/^\d+$/.test(v.trim()) && Number(v) <= max ? Number(v) : null)
 
+function PlanCard() {
+  const profile = useData((s) => s.profile)!
+  const updateSettings = useData((s) => s.updateSettings)
+  const approach = approachOf(profile)
+  const { settings } = profile
+  const [target, setTarget] = useState(settings.targetDate ? dateKey(settings.targetDate) : dateKey(startOfDay(Date.now(), 42)))
+
+  const choose = (a: Approach) => {
+    if (a === settings.approach) return
+    updateSettings({ approach: a })
+    if (a === 'cold-turkey') toast(`Cold turkey: your quit date is ${new Date(profile.journeyStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Change it below if needed.`, { duration: 4500 })
+    else toast(settings.taper ? 'Gradual: your daily limit is on the home screen' : 'Gradual: set a vape-free date below to build your plan', { duration: 4500 })
+  }
+
+  const buildPlan = () => {
+    const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(target)
+    const at = d ? new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3])).getTime() : NaN
+    if (isNaN(at) || at < startOfDay(Date.now(), 7)) { toast('Pick a date at least a week away'); return }
+    const current = dailyLimit(settings.taper, Date.now()) ?? profile.averagePuffsPerDay
+    updateSettings({ targetDate: at, taper: taperToTarget(Math.max(1, current), Date.now(), at) })
+    toast('Plan updated: see your daily limit below')
+  }
+
+  return (
+    <Card title="Your Plan" id="plan">
+      <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-bg p-1" role="radiogroup">
+        {([['cold-turkey', '🧊 Cold turkey'], ['gradual', '📉 Gradual']] as const).map(([a, label]) => (
+          <button key={a} role="radio" aria-checked={approach === a && !!settings.approach} className={`press rounded-lg py-2.5 font-semibold ${approach === a && settings.approach ? 'bg-chip text-fg' : 'text-muted'}`} onClick={() => choose(a)}>{label}</button>
+        ))}
+      </div>
+      {!settings.approach && <p className="mb-3 text-sm text-accent">Pick one: cold turkey gets a home screen focused on time vape-free, milestones and savings.</p>}
+      {approach === 'cold-turkey' ? (
+        <p className="text-sm leading-relaxed text-muted">Stop completely on your quit date. Home shows how long you’ve been vape-free, your next health milestone, hits avoided and money saved.</p>
+      ) : (
+        <>
+          <p className="mb-3 text-sm leading-relaxed text-muted">Cut down with a daily limit that drops every week. Pick when you want to be vape-free and the weekly drop is worked out for you.</p>
+          <label className={labelClass} htmlFor="p-target">Vape-free by</label>
+          <div className="flex gap-2">
+            <input id="p-target" type="date" className="min-w-0 flex-1 rounded-xl border-2 border-line bg-bg px-3 py-2.5 font-semibold" value={target} min={dateKey(startOfDay(Date.now(), 7))} onChange={(e) => setTarget(e.target.value)} />
+            <button className="press shrink-0 rounded-xl bg-accent px-4 font-semibold text-white" onClick={buildPlan}>{settings.taper ? 'Rebuild plan' : 'Build plan'}</button>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
 function JourneyStartCard() {
   const profile = useData((s) => s.profile)!
+  const coldTurkey = approachOf(profile) === 'cold-turkey'
   const updateProfile = useData((s) => s.updateProfile)
   const [editing, setEditing] = useState(false)
   const [date, setDate] = useState('')
@@ -67,21 +116,22 @@ function JourneyStartCard() {
     if (!t) { toast('Please enter a valid time'); return }
     const at = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]))
     if (isNaN(at.getTime())) { toast('Invalid date or time'); return }
-    if (at.getTime() > Date.now()) { toast('Journey start date cannot be in the future'); return }
+    if (!coldTurkey && at.getTime() > Date.now()) { toast('Tracking can’t start in the future'); return }
+    if (at.getTime() > Date.now() + 90 * 86_400_000) { toast('Pick a quit date within the next 90 days'); return }
     updateProfile({ journeyStart: at.getTime() })
     setEditing(false)
-    toast('Journey start date updated')
+    toast(coldTurkey ? 'Quit date updated' : 'Start date updated')
   }
 
   return (
-    <Card title="Journey Start" action={!editing && <EditButton onClick={start} />}>
+    <Card title={coldTurkey ? 'Quit Date' : 'Tracking Since'} id="journey" action={!editing && <EditButton onClick={start} />}>
       {editing ? (
         <>
           <label className={labelClass} htmlFor="j-date">Date</label>
-          <input id="j-date" type="date" className={inputClass} value={date} max={dateKey(Date.now())} onChange={(e) => setDate(e.target.value)} />
+          <input id="j-date" type="date" className={inputClass} value={date} max={dateKey(coldTurkey ? startOfDay(Date.now(), 90) : Date.now())} onChange={(e) => setDate(e.target.value)} />
           <label className={labelClass} htmlFor="j-time">Time</label>
           <input id="j-time" type="time" className={inputClass} value={time} onChange={(e) => setTime(e.target.value)} />
-          <p className="mb-4 text-xs leading-relaxed text-muted">Hits logged before the new start are hidden, not deleted. Move the date back to see them again.</p>
+          <p className="mb-4 text-xs leading-relaxed text-muted">{coldTurkey ? 'The moment of your last hit. A future date shows a countdown until then. ' : ''}Hits logged before this date count as pre-quit history: they set your baseline and never count as slips.</p>
           <SaveCancel onSave={save} onCancel={() => setEditing(false)} />
         </>
       ) : (
@@ -121,7 +171,7 @@ function AveragePuffsCard() {
           <p className="mt-3 text-sm leading-[22px] text-muted">
             {baseline.source === 'history'
               ? <>Hits avoided and money saved are measured against your real pre-quit average: <b className="text-fg">{baseline.perDay.toFixed(baseline.perDay < 10 ? 1 : 0)} a day</b> from {baseline.days} {baseline.days === 1 ? 'day' : 'days'} of history before you quit. This number is used to generate backfilled history.</>
-              : <>Used to calculate how many puffs you’re avoiding, until there is history from before you quit (backfill it below, or log earlier hits). Then the real pre-quit average is used instead.</>}
+              : <>Used to calculate how many puffs you’re avoiding, until there is at least a week of history from before you quit (backfill it below, or log earlier hits). Then the real pre-quit average is used instead.</>}
           </p>
         </>
       )}
@@ -450,6 +500,7 @@ export default function Settings() {
         </Card>
 
         <SectionLabel>JOURNEY</SectionLabel>
+        <PlanCard />
         <JourneyStartCard />
         <AveragePuffsCard />
         <GoalCard />
@@ -477,7 +528,7 @@ export default function Settings() {
           className="press mx-auto block p-2 text-center text-xs text-muted"
           onClick={async () => { try { for (const r of (await navigator.serviceWorker?.getRegistrations()) ?? []) await r.update() } catch { /* offline */ } window.location.reload() }}
         >
-          V2.2 · build {__BUILD_TIME__} · tap to check for updates
+          V3.0 · build {__BUILD_TIME__} · tap to check for updates
         </button>
       </main>
     </div>

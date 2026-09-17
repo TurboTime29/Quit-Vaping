@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { toast } from '../components/Dialogs'
 import HitSheet, { useReasons } from '../components/HitSheet'
+import ReasonPicker, { type PickMode } from '../components/ReasonPicker'
 import { BarChart, Settings as SettingsIcon } from '../components/Icons'
 import {
   TIMEFRAMES, compareWithYesterday, costPerPuff, countBetween, dailyLimit, dateKey, formatClock, formatDuration, formatHour, formatMoney,
@@ -10,7 +10,8 @@ import {
 import { healthProgress } from '../lib/health'
 import { useHitData, useNow } from '../lib/hooks'
 import { useData } from '../store/data'
-import { reasonColor, type DailyStats } from '../types'
+import { approachOf, reasonColor, type DailyStats } from '../types'
+import ColdTurkeyHome, { PreQuitHome } from './ColdTurkeyHome'
 
 /** Red when fewer avoided than taken, green when more. */
 const avoidedColor = (avoided: number, taken: number) => (avoided < taken ? 'text-accent' : avoided === taken ? 'text-fg' : 'text-good')
@@ -30,45 +31,6 @@ function Timer({ since }: { since: number }) {
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-type PickMode = 'hit' | 'resisted'
-
-function ReasonPicker({ mode, onDone, onEarlier }: { mode: PickMode; onDone: () => void; onEarlier: () => void }) {
-  const recordHit = useData((s) => s.recordHit)
-  const deleteHit = useData((s) => s.deleteHit)
-  const reasons = useReasons()
-  const [note, setNote] = useState<string | null>(null)
-  const navigate = useNavigate()
-
-  const log = (reason?: string) => {
-    const id = recordHit({ reason, note: note ?? undefined, kind: mode === 'resisted' ? 'resisted' : undefined })
-    onDone()
-    toast(mode === 'resisted' ? 'Win logged. Nice work 💪' : 'Logged. Timer reset, you’ve got this.', { action: { label: 'Undo', run: () => deleteHit(id) } })
-  }
-
-  return (
-    <div className="fade-in mb-8">
-      <p className="mb-4 text-center text-sm font-semibold tracking-wide text-muted">{mode === 'hit' ? 'Why did you vape?' : 'What triggered the craving?'}</p>
-      <div className={`grid gap-3 ${reasons.length > 5 ? 'grid-cols-2' : ''}`}>
-        {reasons.map((r) => (
-          <button key={r} className="press rounded-2xl border-2 border-line bg-card p-4 font-semibold" onClick={() => log(r)}>{r}</button>
-        ))}
-      </div>
-      {mode === 'resisted' && <button className="press mt-3 w-full rounded-2xl border-2 border-line p-4 font-semibold text-muted" onClick={() => log()}>Skip, just log the win</button>}
-      {note === null ? (
-        <button className="press mt-3 w-full p-2 text-[15px] font-semibold text-muted" onClick={() => setNote('')}>+ Add a note</button>
-      ) : (
-        <textarea autoFocus rows={2} maxLength={500} className="mt-3 w-full resize-none rounded-2xl border-2 border-line bg-bg p-4" placeholder="Note (optional), then pick a reason above" value={note} onChange={(e) => setNote(e.target.value)} />
-      )}
-      <div className="mt-1 flex justify-between text-[15px] font-semibold text-muted">
-        <button className="press p-2" onClick={onDone}>Cancel</button>
-        {mode === 'hit'
-          ? <button className="press p-2" onClick={() => navigate('/craving')}>Not yet: ride it out</button>
-          : <button className="press p-2" onClick={onEarlier}>Log for an earlier time</button>}
-      </div>
     </div>
   )
 }
@@ -336,7 +298,7 @@ function Carousel() {
   )
 }
 
-export default function Home() {
+export function GradualHome() {
   const navigate = useNavigate()
   const location = useLocation()
   const { profile, lastHit } = useHitData()
@@ -360,6 +322,12 @@ export default function Home() {
       </header>
 
       <main className="px-6 pt-8 pb-4">
+        {!profile!.settings.approach && (
+          <Link to="/settings#plan" className="press -mt-4 mb-6 block rounded-[20px] border-2 border-good/40 p-4">
+            <div className="font-bold">New: choose your plan</div>
+            <div className="mt-0.5 text-sm text-muted">Quitting cold turkey? Switch to a home screen focused on time vape-free, health milestones and money saved. →</div>
+          </Link>
+        )}
         <p className="mb-6 text-center text-sm font-semibold tracking-wider text-muted">TIME SINCE LAST HIT</p>
         <Timer since={lastHit ?? profile!.journeyStart} />
 
@@ -383,4 +351,20 @@ export default function Home() {
       {sheet && <HitSheet initialKind={sheet} onClose={() => setSheet(null)} />}
     </div>
   )
+}
+
+/** Cold turkey gets a progress-first home (with a countdown before a future quit date); gradual keeps the logging home. */
+export default function Home() {
+  const profile = useData((s) => s.profile)
+  const [, recheck] = useState(0)
+  const quitAt = profile?.journeyStart ?? 0
+  const upcoming = quitAt > Date.now()
+  // Switch from the countdown to the vape-free home the moment the quit time arrives (timers cap at ~24.8 days).
+  useEffect(() => {
+    if (!upcoming) return
+    const timer = setTimeout(() => recheck((n) => n + 1), Math.min(quitAt - Date.now() + 50, 2_000_000_000))
+    return () => clearTimeout(timer)
+  }, [quitAt, upcoming])
+  if (approachOf(profile) === 'cold-turkey') return upcoming ? <PreQuitHome /> : <ColdTurkeyHome />
+  return <GradualHome />
 }

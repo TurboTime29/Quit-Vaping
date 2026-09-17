@@ -15,13 +15,14 @@ function dayLabel(key: string) {
   return parseDateKey(key).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 }
 
-function HitRow({ hit, onEdit }: { hit: Hit; onEdit: () => void }) {
+function HitRow({ hit, onEdit, quitAt }: { hit: Hit; onEdit: () => void; quitAt: number }) {
   const resisted = hit.kind === 'resisted'
-  const detail = [resisted ? 'Resisted' : null, hit.reason ?? (hit.backfill ? 'Backfilled' : null)].filter(Boolean).join(' · ')
+  const preQuit = !hit.backfill && !resisted && hit.ts < quitAt
+  const detail = [resisted ? 'Resisted' : null, hit.backfill ? 'Backfilled' : preQuit ? 'Before quitting' : null, hit.reason].filter(Boolean).join(' · ')
   return (
     <li>
       <button className="press mb-2 flex w-full items-center rounded-xl bg-card p-4 text-left" onClick={onEdit} aria-label={`Edit ${resisted ? 'win' : 'hit'} at ${new Date(hit.ts).toLocaleTimeString()}`}>
-        <span className={`mr-3 size-2 shrink-0 rounded-full ${resisted ? 'bg-good' : hit.backfill ? 'bg-muted' : 'bg-accent'}`} />
+        <span className={`mr-3 size-2 shrink-0 rounded-full ${resisted ? 'bg-good' : hit.backfill || preQuit ? 'bg-muted' : 'bg-accent'}`} />
         <span className="min-w-0 flex-1">
           <span className="block font-semibold">{new Date(hit.ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
           {detail && <span className={`mt-1 block text-xs ${resisted ? 'text-good' : 'text-muted'}`}>{detail}</span>}
@@ -34,7 +35,7 @@ function HitRow({ hit, onEdit }: { hit: Hit; onEdit: () => void }) {
 }
 
 export default function History() {
-  const { visible } = useHitData()
+  const { visible, profile } = useHitData()
   const [editing, setEditing] = useState<Hit | null>(null)
   const [adding, setAdding] = useState(false)
   const [pages, setPages] = useState(1)
@@ -82,7 +83,7 @@ export default function History() {
                   </span>
                 </div>
                 <ul>
-                  {records.map((h) => <HitRow key={h.id} hit={h} onEdit={() => setEditing(h)} />)}
+                  {records.map((h) => <HitRow key={h.id} hit={h} quitAt={profile!.journeyStart} onEdit={() => setEditing(h)} />)}
                 </ul>
               </section>
             )

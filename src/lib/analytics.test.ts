@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, type Hit, type Profile } from '../types'
 import {
   DAY_MS, compareWithYesterday, costPerPuff, dailyLimit, dailyStats, dateKey, formatClock, formatStreak, generateBackfill, heatmap,
-  hourProfile, lastHitTime, lastNDays, longestStreak, nextLimitDrop, parseDateKey, preQuitBaseline, realHits, reasonBreakdown, reasonStats, savings, topHours,
+  hourProfile, journeyHits, lastHitTime, taperToTarget, lastNDays, longestStreak, nextLimitDrop, parseDateKey, preQuitBaseline, realHits, reasonBreakdown, reasonStats, savings, startOfDay, topHours,
   totalAvoided, visibleHits, weekSummary, weekdayAverages,
 } from './analytics'
-import { healthProgress } from './health'
+import { HEALTH_MILESTONES, healthProgress } from './health'
 import { mergeRemote, hitToRow, profileToRow, rowToHit, rowToProfile } from './merge'
 import { plan } from '../../supabase/functions/quit-reminders/plan.ts'
 
@@ -21,12 +21,28 @@ describe('dates', () => {
 })
 
 describe('visible hits', () => {
-  it('hides (but keeps) real hits before the journey start and drops tombstones', () => {
+  it('keeps pre-quit logs as history, drops tombstones, and counts only journey hits as slips', () => {
     const p = profile(at(2026, 9, 10))
     const hits = [hit('old', at(2026, 9, 9)), hit('bf', at(2026, 9, 1), { backfill: true }), hit('new', at(2026, 9, 11)), hit('gone', at(2026, 9, 12), { deleted: true })]
-    expect(visibleHits(hits, p).map((h) => h.id)).toEqual(['bf', 'new'])
-    expect(realHits(visibleHits(hits, p)).map((h) => h.id)).toEqual(['new'])
-    expect(lastHitTime(realHits(visibleHits(hits, p)))).toBe(at(2026, 9, 11))
+    expect(visibleHits(hits).map((h) => h.id)).toEqual(['old', 'bf', 'new'])
+    expect(realHits(visibleHits(hits)).map((h) => h.id)).toEqual(['old', 'new'])
+    expect(journeyHits(visibleHits(hits), p).map((h) => h.id)).toEqual(['new'])
+    expect(lastHitTime(journeyHits(visibleHits(hits), p))).toBe(at(2026, 9, 11))
+  })
+
+  it('builds a gradual plan that reaches zero by the target date', () => {
+    const start = at(2026, 9, 17, 12)
+    const t = taperToTarget(120, start, at(2026, 10, 29)) // 6 weeks
+    expect(t).toEqual({ startLimit: 120, weeklyDrop: 20, startedAt: start })
+    expect(dailyLimit(t, at(2026, 10, 29))).toBe(0)
+    expect(dailyLimit(t, at(2026, 10, 28))).toBe(20)
+    expect(taperToTarget(7, start, at(2026, 9, 25)).weeklyDrop).toBe(7)
+  })
+
+  it('lists health milestones in order with sources', () => {
+    expect(HEALTH_MILESTONES.map((m) => m.after)).toEqual([...HEALTH_MILESTONES.map((m) => m.after)].sort((a, b) => a - b))
+    for (const m of HEALTH_MILESTONES) expect(m.source.url).toMatch(/^https:\/\//)
+    expect(healthProgress(-5000).next!.label).toBe('20 minutes') // before a future quit date
   })
 })
 
@@ -132,8 +148,12 @@ describe('pre-quit baseline and savings', () => {
     expect(totalAvoided(p, real, now, 40)).toBe(78) // 40 * 2 - 2, not 100 * 2 - 2
   })
 
-  it('falls back to the Average Puffs setting without pre-quit history', () => {
+  it('falls back to the Average Puffs setting without at least a week of pre-quit history', () => {
     expect(preQuitBaseline(p, [hit('after', quit + 1000)])).toEqual({ perDay: 100, source: 'setting', days: 0 })
+    // One hit logged the day before quitting is not a habit measurement.
+    expect(preQuitBaseline(p, [hit('yday', quit - DAY_MS)]).source).toBe('setting')
+    const week = Array.from({ length: 7 * 30 }, (_, i) => hit(`w${i}`, startOfDay(quit, -7) + i * (DAY_MS / 30)))
+    expect(preQuitBaseline(p, week)).toEqual({ perDay: 30, source: 'history', days: 7 })
   })
 
   it('adds up money saved, spent and pods', () => {
@@ -235,9 +255,9 @@ describe('v2.1 insights', () => {
 
   it('tracks health milestones from the current streak', () => {
     const h = healthProgress(2.5 * DAY_MS)
-    expect(h.last!.label).toBe('2 days')
+    expect(h.last!.label).toBe('1 day')
     expect(h.next!.label).toBe('3 days')
-    expect(h.progress).toBeCloseTo(0.5)
+    expect(h.progress).toBeCloseTo(0.75) // halfway from 1 day to 3 days is 2 days; 2.5 is three quarters
   })
 
   it('round-trips notes, wins and settings through sync rows', () => {

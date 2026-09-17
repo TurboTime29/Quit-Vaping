@@ -2,7 +2,7 @@
 
 A quit-vaping tracker: log every hit with a reason, watch the time since your last one, compare with yesterday, and see your streaks and how many hits you have avoided.
 
-**Features:** hit logging with reasons (customisable), notes and undo · resisted cravings ("wins") · log a missed hit at any time · daily limit goal that tapers weekly · money saved · health milestone timeline · Insights (this week vs last, peak hours, weekday averages, 30/90-day trend, calendar heatmap) · craving tools (urge-surfing countdown, box breathing) · reminder notifications (daily check-in, streak milestones) · cloud sync, backup, and account deletion.
+**Features:** cold turkey or gradual plans (quit date now, earlier or in the future; a progress-first home for cold turkey with health milestones, hits avoided and money saved; a countdown and prep checklist before a future quit date; a weekly tapering limit for gradual) · hit logging with reasons (customisable), notes and undo · resisted cravings ("wins") · log a missed hit at any time · daily limit goal that tapers weekly · money saved · health milestone timeline · Insights (this week vs last, peak hours, weekday averages, 30/90-day trend, calendar heatmap) · craving tools (urge-surfing countdown, box breathing) · reminder notifications (daily check-in, streak milestones) · cloud sync, backup, and account deletion.
 
 Originally built with Rork (Expo / React Native; the untouched export is the first commit). Rebuilt as a web app that installs to the iPhone home screen and syncs through Supabase.
 

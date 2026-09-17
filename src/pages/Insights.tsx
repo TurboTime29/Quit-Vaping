@@ -113,7 +113,7 @@ function SavingsCard() {
             <Stat label="PODS NOT BOUGHT" value={s.pods.toFixed(s.pods < 10 ? 1 : 0)} />
             <Stat label="LATELY" value={formatMoney(s.perDayRecent)} sub="saved per day" tone="text-good" />
           </div>
-          <SavingsChart daily={s.daily} />
+          {s.daily.length > 0 && <SavingsChart daily={s.daily} />}
           <p className="mt-4 rounded-xl bg-bg p-3 text-sm leading-relaxed">
             At this pace: <b className="text-good">{formatMoney(s.perDayRecent * 30)}</b> a month, <b className="text-good">{formatMoney(s.perDayRecent * 365)}</b> a year.
           </p>
@@ -311,7 +311,7 @@ function HealthTimeline() {
   const { next, progress } = healthProgress(streak)
   return (
     <Card title="HEALTH TIMELINE" id="health">
-      <p className="mb-4 text-sm text-muted">Counting from your last hit: <b className="text-fg">{formatDuration(streak)}</b></p>
+      <p className="mb-4 text-sm text-muted">{streak < 0 ? <>Starts at your quit date, in <b className="text-fg">{formatDuration(-streak)}</b></> : <>Counting from your last hit: <b className="text-fg">{formatDuration(streak)}</b></>}</p>
       <ol className="relative ml-2 border-l-2 border-line">
         {HEALTH_MILESTONES.map((m) => {
           const reached = streak >= m.after
@@ -319,14 +319,16 @@ function HealthTimeline() {
           return (
             <li key={m.label} className="relative mb-5 pl-5 last:mb-0">
               <span className={`absolute top-1 -left-[9px] flex size-4 items-center justify-center rounded-full text-[10px] font-bold ${reached ? 'bg-good text-white' : isNext ? 'border-2 border-good bg-card' : 'border-2 border-line bg-card'}`}>{reached ? '✓' : ''}</span>
-              <div className={`text-sm font-bold ${reached ? 'text-good' : isNext ? '' : 'text-muted'}`}>{m.label}{isNext && <span className="ml-2 text-xs font-semibold text-muted">in {formatDuration(m.after - streak)}</span>}</div>
+              <div className={`text-xs font-semibold tracking-wide ${reached ? 'text-good' : 'text-muted'}`}>{m.label.toUpperCase()}{isNext && streak >= 0 && <span className="ml-2 normal-case">· in {formatDuration(m.after - streak)}</span>}</div>
+              <div className={`mt-0.5 font-bold ${reached || isNext ? '' : 'text-muted'}`}>{m.title}</div>
               <p className={`mt-0.5 text-sm leading-snug ${reached || isNext ? '' : 'text-muted'}`}>{m.detail}</p>
+              <a href={m.source.url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11px] text-muted underline">Source: {m.source.name}</a>
               {isNext && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-good" style={{ width: `${progress * 100}%` }} /></div>}
             </li>
           )
         })}
       </ol>
-      <p className="mt-5 text-xs leading-relaxed text-muted">Typical timings people report after stopping nicotine. Everyone is different, and this isn’t medical advice.</p>
+      <p className="mt-5 text-xs leading-relaxed text-muted">Timings for nicotine leaving your body and withdrawal apply to any nicotine product. Lung, heart and mood findings come mostly from research on people who quit smoking, since long-term vaping research is still emerging. Everyone is different, and this isn’t medical advice.</p>
     </Card>
   )
 }

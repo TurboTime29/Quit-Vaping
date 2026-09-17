@@ -59,7 +59,14 @@ export interface SleepWindow {
   end: string
 }
 
+/** Cold turkey: stop completely at the quit date. Gradual: cut down with a daily limit towards a vape-free target. */
+export type Approach = 'cold-turkey' | 'gradual'
+
 export interface ProfileSettings {
+  /** Undefined for journeys started before the plan choice existed (treated as gradual). */
+  approach?: Approach
+  /** Gradual plan: the date the user wants to be vape-free by (epoch ms). */
+  targetDate?: number | null
   reasons: string[]
   sleep: SleepWindow
   taper: Taper | null
@@ -68,6 +75,7 @@ export interface ProfileSettings {
 }
 
 export const DEFAULT_SETTINGS: ProfileSettings = {
+  targetDate: null,
   reasons: DEFAULT_REASONS,
   sleep: { start: '01:00', end: '08:30' },
   taper: null,
@@ -77,6 +85,8 @@ export const DEFAULT_SETTINGS: ProfileSettings = {
 
 export function normalizeSettings(s: Partial<ProfileSettings> | null | undefined): ProfileSettings {
   return {
+    ...(s?.approach === 'cold-turkey' || s?.approach === 'gradual' ? { approach: s.approach } : {}),
+    targetDate: typeof s?.targetDate === 'number' ? s.targetDate : null,
     reasons: Array.isArray(s?.reasons) && s.reasons.length ? s.reasons : DEFAULT_REASONS,
     sleep: s?.sleep?.start && s.sleep.end ? s.sleep : DEFAULT_SETTINGS.sleep,
     taper: s?.taper ?? null,
@@ -93,6 +103,8 @@ export interface Profile {
   settings: ProfileSettings
   updatedAt: number
 }
+
+export const approachOf = (p: Profile | null): Approach => p?.settings.approach ?? 'gradual'
 
 export type ThemeMode = 'light' | 'dark'
 
