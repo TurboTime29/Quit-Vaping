@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import BrickBreaker from '../components/BrickBreaker'
 import { toast } from '../components/Dialogs'
 import PageHeader from '../components/PageHeader'
 import { useNow } from '../lib/hooks'
@@ -57,11 +58,17 @@ const SURF_PROMPTS = [
   'Most cravings pass within a few minutes. You’re riding this one out.',
 ]
 
+interface SurfTimer {
+  minutes: number
+  setMinutes: (m: number) => void
+  endsAt: number | null
+  setEndsAt: (t: number | null) => void
+}
+
 /** Urge surfing: a countdown that walks through the craving with rotating prompts. */
-function Surf({ onWin }: { onWin: () => void }) {
+function Surf({ timer, onWin, onPlay }: { timer: SurfTimer; onWin: () => void; onPlay: () => void }) {
   const now = useNow(1000)
-  const [minutes, setMinutes] = useState(5)
-  const [endsAt, setEndsAt] = useState<number | null>(null)
+  const { minutes, setMinutes, endsAt, setEndsAt } = timer
   const total = minutes * 60_000
   const left = endsAt ? Math.max(0, endsAt - now) : total
   const done = endsAt !== null && left === 0
@@ -104,6 +111,36 @@ function Surf({ onWin }: { onWin: () => void }) {
           {endsAt ? 'Stop' : 'Start countdown'}
         </button>
       )}
+      {!done && <button className="press mt-3 p-2 text-[15px] font-semibold text-accent" onClick={onPlay}>🎮 Play a game while you wait</button>}
+    </div>
+  )
+}
+
+/** A game to keep hands and head busy, with the urge-surf countdown still running above it. */
+function Play({ timer, onWin }: { timer: SurfTimer; onWin: () => void }) {
+  const now = useNow(1000)
+  const [startedAt] = useState(() => Date.now())
+  const left = timer.endsAt ? Math.max(0, timer.endsAt - now) : null
+  const fmt = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+
+  return (
+    <div className="mt-4">
+      <div className="mb-3 flex min-h-10 items-center justify-between gap-3 text-sm">
+        {left === null ? (
+          <>
+            <span className="text-muted">Playing for <b className="tabular text-fg">{fmt(now - startedAt)}</b></span>
+            <button className="press rounded-full border-2 border-line px-3 py-1.5 font-semibold" onClick={() => timer.setEndsAt(Date.now() + timer.minutes * 60_000)}>🌊 Start {timer.minutes} min timer</button>
+          </>
+        ) : left > 0 ? (
+          <span className="text-muted">🌊 <b className="tabular text-fg">{fmt(left)}</b> left to ride out the craving</span>
+        ) : (
+          <>
+            <span className="font-semibold text-good">🌊 You rode it out!</span>
+            <button className="press rounded-full bg-good px-4 py-1.5 font-semibold text-white" onClick={onWin}>Log a win</button>
+          </>
+        )}
+      </div>
+      <BrickBreaker />
     </div>
   )
 }
@@ -112,7 +149,10 @@ export default function Craving() {
   const navigate = useNavigate()
   const recordHit = useData((s) => s.recordHit)
   const deleteHit = useData((s) => s.deleteHit)
-  const [tool, setTool] = useState<'surf' | 'breathe'>('surf')
+  const [tool, setTool] = useState<'surf' | 'play' | 'breathe'>('surf')
+  const [minutes, setMinutes] = useState(5)
+  const [endsAt, setEndsAt] = useState<number | null>(null)
+  const timer: SurfTimer = { minutes, setMinutes, endsAt, setEndsAt }
 
   const win = () => {
     const id = recordHit({ kind: 'resisted' })
@@ -124,13 +164,15 @@ export default function Craving() {
     <div className="safe-top safe-bottom mx-auto min-h-dvh max-w-md">
       <PageHeader title="Ride it out" />
       <main className="px-6 pb-8">
-        <div className="grid grid-cols-2 gap-1 rounded-xl bg-card p-1" role="tablist">
-          {([['surf', 'Urge surf'], ['breathe', 'Breathe']] as const).map(([id, label]) => (
+        <div className="grid grid-cols-3 gap-1 rounded-xl bg-card p-1" role="tablist">
+          {([['surf', 'Urge surf'], ['play', 'Play'], ['breathe', 'Breathe']] as const).map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tool === id} className={`press rounded-lg py-2.5 font-semibold ${tool === id ? 'bg-bg' : 'text-muted'}`} onClick={() => setTool(id)}>{label}</button>
           ))}
         </div>
 
-        {tool === 'surf' ? <Surf onWin={win} /> : <Breathe />}
+        {tool === 'surf' && <Surf timer={timer} onWin={win} onPlay={() => setTool('play')} />}
+        {tool === 'play' && <Play timer={timer} onWin={win} />}
+        {tool === 'breathe' && <Breathe />}
 
         <div className="mt-8 grid gap-3 border-t border-line pt-6">
           <button className="press w-full rounded-2xl border-2 border-good/40 p-4 font-semibold text-good" onClick={win}>Craving passed: log a win</button>
