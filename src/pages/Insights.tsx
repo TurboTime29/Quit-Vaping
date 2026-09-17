@@ -1,10 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import CostForm from '../components/CostForm'
 import { useReasons } from '../components/HitSheet'
 import PageHeader from '../components/PageHeader'
+import Sheet from '../components/Sheet'
 import {
   costPerPuff, dailyLimit, formatDuration, formatHour, formatMoney, heatmap, hourProfile, lastNDays, nextLimitDrop, parseDateKey,
-  reasonBreakdown, startOfDay, topHours, weekSummary, weekdayAverages,
+  reasonBreakdown, savings, startOfDay, topHours, weekSummary, weekdayAverages,
 } from '../lib/analytics'
 import { HEALTH_MILESTONES, healthProgress } from '../lib/health'
 import { useHitData, useNow } from '../lib/hooks'
@@ -42,8 +44,8 @@ function Segmented<T extends string | number>({ value, options, onChange }: { va
 
 function WeekCard() {
   const now = useNow(60_000)
-  const { hits, real, wins, profile } = useHitData()
-  const w = useMemo(() => weekSummary(hits, real, wins, profile, now), [hits, real, wins, profile, now])
+  const { hits, real, wins, profile, baseline } = useHitData()
+  const w = useMemo(() => weekSummary(hits, real, wins, profile, now, baseline.perDay), [hits, real, wins, profile, now, baseline.perDay])
   const perPuff = costPerPuff(profile?.settings.cost ?? null)
   const change = w.changePct
   return (
@@ -58,8 +60,67 @@ function WeekCard() {
         <Stat label="CRAVINGS RESISTED" value={w.winsThisWeek} tone={w.winsThisWeek ? 'text-good' : ''} />
         {perPuff !== null
           ? <Stat label="SAVED THIS WEEK" value={formatMoney(w.avoidedThisWeek * perPuff)} tone="text-good" sub={`${w.avoidedThisWeek} hits avoided`} />
-          : <Stat label="HITS AVOIDED" value={w.avoidedThisWeek} sub={<Link to="/settings" className="underline">add cost for $ saved</Link>} />}
+          : <Stat label="HITS AVOIDED" value={w.avoidedThisWeek} sub={<a href="#/insights#savings" className="underline">add cost for $ saved</a>} />}
       </div>
+    </Card>
+  )
+}
+
+/** Cumulative savings since the journey start as a filled line. */
+function SavingsChart({ daily }: { daily: { date: string; saved: number }[] }) {
+  const max = Math.max(...daily.map((d) => d.saved), 0.01)
+  const points = [{ x: 0, y: 0 }, ...daily.map((d, i) => ({ x: (i + 1) / daily.length, y: d.saved / max }))]
+  const line = points.map((p) => `${(p.x * 300).toFixed(1)},${(100 - p.y * 96).toFixed(1)}`).join(' L')
+  return (
+    <>
+      <svg viewBox="0 0 300 100" preserveAspectRatio="none" className="h-24 w-full" role="img" aria-label="Savings over time">
+        <path d={`M${line} L300,100 L0,100 Z`} fill="rgba(76,175,80,0.18)" />
+        <path d={`M${line}`} fill="none" stroke="#4CAF50" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] text-muted">
+        <span>Quit {parseDateKey(daily[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+        <span>Today</span>
+      </div>
+    </>
+  )
+}
+
+function SavingsCard() {
+  const now = useNow(60_000)
+  const { profile, real, baseline } = useHitData()
+  const cost = profile?.settings.cost ?? null
+  const [editing, setEditing] = useState(false)
+  const s = useMemo(() => (profile && cost ? savings(profile, real, cost, baseline.perDay, now) : null), [profile, cost, real, baseline.perDay, now])
+
+  const basis = baseline.source === 'history'
+    ? <>Measured against your pre-quit average of <b className="text-fg">{baseline.perDay.toFixed(baseline.perDay < 10 ? 1 : 0)} hits a day</b> from {baseline.days} {baseline.days === 1 ? 'day' : 'days'} of history before you quit.</>
+    : <>Measured against your Average Puffs setting of <b className="text-fg">{profile?.averagePuffsPerDay} a day</b>. Backfill or log hits from before you quit to measure it from real history.</>
+
+  return (
+    <Card title="SAVINGS" id="savings" action={cost && <button className="press -my-2 -mr-2 rounded-lg px-2 py-2 text-xs" onClick={() => setEditing(true)}>Edit cost</button>}>
+      {!s ? (
+        <>
+          <p className="mb-4 text-sm leading-relaxed text-muted">See how much money quitting is saving you. Add what a pod or disposable costs and how many puffs it lasts.</p>
+          <button className="press w-full rounded-xl bg-good p-3.5 font-semibold text-white" onClick={() => setEditing(true)}>Add cost</button>
+        </>
+      ) : (
+        <>
+          <div className="tabular text-5xl font-bold text-good">{formatMoney(s.total)}</div>
+          <p className="mt-1 mb-5 text-sm text-muted">saved since {new Date(profile!.journeyStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+          <div className="mb-5 grid grid-cols-2 gap-5">
+            <Stat label="WOULD HAVE SPENT" value={formatMoney(s.wouldHaveSpent)} />
+            <Stat label="ACTUALLY SPENT" value={formatMoney(s.spent)} sub={`${real.length} ${real.length === 1 ? 'hit' : 'hits'} since quitting`} />
+            <Stat label="PODS NOT BOUGHT" value={s.pods.toFixed(s.pods < 10 ? 1 : 0)} />
+            <Stat label="LATELY" value={formatMoney(s.perDayRecent)} sub="saved per day" tone="text-good" />
+          </div>
+          <SavingsChart daily={s.daily} />
+          <p className="mt-4 rounded-xl bg-bg p-3 text-sm leading-relaxed">
+            At this pace: <b className="text-good">{formatMoney(s.perDayRecent * 30)}</b> a month, <b className="text-good">{formatMoney(s.perDayRecent * 365)}</b> a year.
+          </p>
+        </>
+      )}
+      <p className="mt-4 text-xs leading-relaxed text-muted">{basis} Resisted cravings are wins, not hits, so they never reduce your savings.</p>
+      {editing && <Sheet title="Cost" onClose={() => setEditing(false)}><CostForm onDone={() => setEditing(false)} /></Sheet>}
     </Card>
   )
 }
@@ -276,6 +337,7 @@ export default function Insights() {
       <PageHeader title="Insights" />
       <main className="px-6 pb-8">
         <WeekCard />
+        <SavingsCard />
         <LimitCard />
         <TrendCard />
         <HeatmapCard />

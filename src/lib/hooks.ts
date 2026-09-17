@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../store/data'
-import { dailyStats, lastHitTime, onlyHits, onlyWins, realHits, visibleHits } from './analytics'
+import { dailyStats, lastHitTime, onlyHits, onlyWins, preQuitBaseline, realHits, visibleHits } from './analytics'
 
 /** Current time, refreshed every `ms` (aligned to the wall clock so seconds tick together). */
 export function useNow(ms = 1000) {
@@ -35,6 +35,8 @@ export function useHitData() {
     /** Hits the user logged: streaks, totals, avoided. */
     const real = realHits(hitList)
     const wins = onlyWins(visible)
-    return { profile, visible, hits: hitList, real, wins, stats: dailyStats(hitList), lastHit: lastHitTime(real) }
+    /** Pre-quit hits per day that avoided and saved are measured against. */
+    const baseline = preQuitBaseline(profile, hits)
+    return { profile, visible, hits: hitList, real, wins, stats: dailyStats(hitList), lastHit: lastHitTime(real), baseline }
   }, [hits, profile])
 }

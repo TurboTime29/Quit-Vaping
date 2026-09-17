@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import AccountPanel from '../components/AccountPanel'
+import CostForm from '../components/CostForm'
+import Sheet from '../components/Sheet'
 import { confirmDialog, toast } from '../components/Dialogs'
 import { ChevronDown, ChevronUp, Moon, Sun, X } from '../components/Icons'
 import PageHeader from '../components/PageHeader'
-import { costPerPuff, countBetween, dailyLimit, dateKey, formatMoney, nextLimitDrop, startOfDay } from '../lib/analytics'
+import { costPerPuff, countBetween, dailyLimit, dateKey, formatMoney, nextLimitDrop, overnightHits, startOfDay } from '../lib/analytics'
 import { useHitData } from '../lib/hooks'
 import { currentSubscription, disablePush, enablePush, isStandalone, pushAvailability, sendTestNotification } from '../lib/push'
 import { deleteAccount, deleteCloudData, syncEnabled, useSession } from '../lib/sync'
@@ -93,6 +95,7 @@ function JourneyStartCard() {
 
 function AveragePuffsCard() {
   const profile = useData((s) => s.profile)!
+  const { baseline } = useHitData()
   const updateProfile = useData((s) => s.updateProfile)
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
@@ -115,7 +118,11 @@ function AveragePuffsCard() {
       ) : (
         <>
           <p className="text-muted">{profile.averagePuffsPerDay} puffs</p>
-          <p className="mt-3 text-sm leading-[22px] text-muted">Used to calculate how many puffs you’re avoiding since you started your journey. Update it if your average has changed.</p>
+          <p className="mt-3 text-sm leading-[22px] text-muted">
+            {baseline.source === 'history'
+              ? <>Hits avoided and money saved are measured against your real pre-quit average: <b className="text-fg">{baseline.perDay.toFixed(baseline.perDay < 10 ? 1 : 0)} a day</b> from {baseline.days} {baseline.days === 1 ? 'day' : 'days'} of history before you quit. This number is used to generate backfilled history.</>
+              : <>Used to calculate how many puffs you’re avoiding, until there is history from before you quit (backfill it below, or log earlier hits). Then the real pre-quit average is used instead.</>}
+          </p>
         </>
       )}
     </Card>
@@ -181,36 +188,19 @@ function GoalCard() {
 function CostCard() {
   const profile = useData((s) => s.profile)!
   const updateSettings = useData((s) => s.updateSettings)
+  const { baseline } = useHitData()
   const cost = profile.settings.cost
   const [editing, setEditing] = useState(false)
-  const [price, setPrice] = useState('')
-  const [puffs, setPuffs] = useState('')
-
-  const save = () => {
-    const p = Number(price.replace(/[$,\s]/g, ''))
-    const n = wholeNumber(puffs, 100_000)
-    if (!price.trim() || isNaN(p) || p < 0 || p > 1000) { toast('Enter a valid price'); return }
-    if (!n) { toast('Enter how many puffs a pod lasts'); return }
-    updateSettings({ cost: { pricePerPod: Math.round(p * 100) / 100, puffsPerPod: n } })
-    setEditing(false)
-    toast('Cost saved')
-  }
-
   const perPuff = costPerPuff(cost)
+
   return (
-    <Card title="Cost" action={!editing && <EditButton label={cost ? 'Edit' : 'Set up'} onClick={() => { setPrice(cost ? String(cost.pricePerPod) : ''); setPuffs(cost ? String(cost.puffsPerPod) : ''); setEditing(true) }} />}>
+    <Card title="Cost" id="cost" action={!editing && <EditButton label={cost ? 'Edit' : 'Set up'} onClick={() => setEditing(true)} />}>
       {editing ? (
-        <>
-          <label className={labelClass} htmlFor="c-price">Price of one pod or disposable ($)</label>
-          <input id="c-price" className={inputClass} value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" placeholder="e.g. 20" />
-          <label className={labelClass} htmlFor="c-puffs">Puffs it lasts</label>
-          <input id="c-puffs" className={inputClass} value={puffs} onChange={(e) => setPuffs(e.target.value)} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 5000" />
-          <SaveCancel onSave={save} onCancel={() => setEditing(false)} />
-        </>
+        <CostForm onDone={() => setEditing(false)} />
       ) : perPuff !== null ? (
         <>
           <p className="text-muted">{formatMoney(cost!.pricePerPod)} for {cost!.puffsPerPod.toLocaleString()} puffs ({formatMoney(perPuff * 100)} per 100 puffs)</p>
-          <p className="mt-1 text-sm text-muted">At your old average that was {formatMoney(perPuff * profile.averagePuffsPerDay * 7)} a week.</p>
+          <p className="mt-1 text-sm text-muted">Before quitting that was about {formatMoney(perPuff * baseline.perDay * 7)} a week. <a href="#/insights#savings" className="font-semibold text-accent">See savings →</a></p>
           <button className="press mt-3 text-sm font-semibold text-muted" onClick={() => updateSettings({ cost: null })}>Remove</button>
         </>
       ) : (
@@ -395,21 +385,58 @@ function DangerCard() {
   )
 }
 
+const minutesOf = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m }
+const clock = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'AM' : 'PM'}` }
+
+function BackfillSheet({ onClose }: { onClose: () => void }) {
+  const profile = useData((s) => s.profile)!
+  const backfillHistory = useData((s) => s.backfillHistory)
+  const [bed, setBed] = useState(profile.settings.sleep.start)
+  const [wake, setWake] = useState(profile.settings.sleep.end)
+  const avg = profile.averagePuffsPerDay
+  const valid = /^\d{2}:\d{2}$/.test(bed) && /^\d{2}:\d{2}$/.test(wake) && bed !== wake
+  const asleep = valid ? (minutesOf(wake) - minutesOf(bed) + 1440) % 1440 : 0
+  const night = asleep ? overnightHits(avg) : 0
+  const awakeHours = (1440 - asleep) / 60
+  const quit = new Date(profile.journeyStart)
+
+  const run = async () => {
+    if (!valid) { toast('Pick a bedtime and wake-up time'); return }
+    if (profile.hasBackfilled && !(await confirmDialog({ title: 'Replace backfilled history?', message: 'Your existing backfilled days will be regenerated. Hits you logged yourself are not touched.', confirmLabel: 'Replace', destructive: true }))) return
+    backfillHistory({ start: bed, end: wake })
+    onClose()
+    toast('History backfilled')
+  }
+
+  const field = 'w-full rounded-xl border-2 border-line bg-bg px-4 py-3 font-semibold'
+  return (
+    <Sheet title={profile.hasBackfilled ? 'Redo backfill' : 'Backfill history'} onClose={onClose}>
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Generates the 30 days before you quit ({new Date(profile.journeyStart - 30 * 864e5).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} to {quit.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}) at your average of <b className="text-fg">{avg} hits a day</b>, so charts have a before picture and savings use real numbers. Your streak isn’t affected.
+      </p>
+      <div className="mb-4 grid grid-cols-2 gap-3">
+        <div><label className={labelClass} htmlFor="bf-bed">Asleep from</label><input id="bf-bed" type="time" className={field} value={bed} onChange={(e) => setBed(e.target.value)} /></div>
+        <div><label className={labelClass} htmlFor="bf-wake">Awake at</label><input id="bf-wake" type="time" className={field} value={wake} onChange={(e) => setWake(e.target.value)} /></div>
+      </div>
+      {valid && (
+        <div className="mb-5 grid gap-2 rounded-xl bg-bg p-4 text-sm">
+          <div className="flex justify-between"><span className="text-muted">Awake {clock(wake)} to {clock(bed)}</span><b>{avg - night} hits</b></div>
+          <div className="text-xs text-muted">spread evenly, about {((avg - night) / awakeHours).toFixed(1)} an hour</div>
+          <div className="flex justify-between"><span className="text-muted">Overnight {clock(bed)} to {clock(wake)}</span><b>{night} {night === 1 ? 'hit' : 'hits'}</b></div>
+        </div>
+      )}
+      <button className="press w-full rounded-xl bg-accent p-4 font-semibold text-white" onClick={() => void run()}>{profile.hasBackfilled ? 'Regenerate 30 days' : 'Backfill 30 days'}</button>
+      <p className="mt-3 text-xs leading-relaxed text-muted">Want a different daily number? Change Average Puffs Per Day first. Backfilled hits show as grey dots in History and can be edited or deleted there.</p>
+    </Sheet>
+  )
+}
+
 export default function Settings() {
   const theme = useData((s) => s.theme)
   const toggleTheme = useData((s) => s.toggleTheme)
   const profile = useData((s) => s.profile)!
-  const backfillHistory = useData((s) => s.backfillHistory)
   const isDark = theme === 'dark'
-
-  const backfill = async () => {
-    const ok = profile.hasBackfilled
-      ? await confirmDialog({ title: 'Already Backfilled', message: 'You’ve already backfilled your history. Would you like to redo it? This will replace the existing backfill data.', confirmLabel: 'Redo', destructive: true })
-      : await confirmDialog({ title: 'Backfill History', message: `This will generate 30 days of vaping history before your quit date based on your average of ${profile.averagePuffsPerDay} hits/day. This won’t affect your streak or stats.`, confirmLabel: 'Backfill' })
-    if (!ok) return
-    backfillHistory()
-    toast('History backfilled')
-  }
+  const [backfilling, setBackfilling] = useState(false)
 
   return (
     <div className="safe-top safe-bottom mx-auto min-h-dvh max-w-md">
@@ -440,16 +467,17 @@ export default function Settings() {
             <p className="text-sm leading-relaxed text-muted">In Safari, tap <b className="text-fg">Share</b> then <b className="text-fg">Add to Home Screen</b>. It opens full screen like a normal app, works offline, and can send reminders.</p>
           </Card>
         )}
-        <button className="press mb-4 w-full rounded-2xl border border-line p-4 text-[15px] font-semibold" onClick={() => void backfill()}>
+        <button className="press mb-4 w-full rounded-2xl border border-line p-4 text-[15px] font-semibold" onClick={() => setBackfilling(true)}>
           <span className={profile.hasBackfilled ? 'text-muted' : ''}>{profile.hasBackfilled ? 'History Backfilled ✓' : 'Backfill History'}</span>
         </button>
         <DangerCard />
+        {backfilling && <BackfillSheet onClose={() => setBackfilling(false)} />}
 
         <button
           className="press mx-auto block p-2 text-center text-xs text-muted"
           onClick={async () => { try { for (const r of (await navigator.serviceWorker?.getRegistrations()) ?? []) await r.update() } catch { /* offline */ } window.location.reload() }}
         >
-          V2.1 · build {__BUILD_TIME__} · tap to check for updates
+          V2.2 · build {__BUILD_TIME__} · tap to check for updates
         </button>
       </main>
     </div>

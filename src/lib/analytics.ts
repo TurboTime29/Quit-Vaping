@@ -1,4 +1,4 @@
-import type { Cost, DailyStats, Hit, Profile, Taper } from '../types'
+import type { Cost, DailyStats, Hit, Profile, SleepWindow, Taper } from '../types'
 import { DEFAULT_REASONS } from '../types'
 
 export const DAY_MS = 24 * 60 * 60 * 1000
@@ -77,11 +77,43 @@ export function lastNDays(stats: Map<string, DailyStats>, now: number, n = 7): D
   return out
 }
 
-/** Hits a user would have taken since the journey began at their old average, minus the ones they did take. */
-export function totalAvoided(profile: Profile | null, real: Hit[], now: number): number {
+export interface Baseline {
+  /** Hits per day before quitting. */
+  perDay: number
+  /** 'history' when measured from logged or backfilled hits before the journey start, else the Average Puffs setting. */
+  source: 'history' | 'setting'
+  /** Days of pre-quit history the average covers (0 for the setting). */
+  days: number
+}
+
+/**
+ * The pre-quit daily rate that "avoided" and "saved" are measured against: hits recorded in up to 30 full days
+ * before the journey start (backfilled or logged, never resisted cravings or deleted records), falling back to
+ * the Average Puffs Per Day setting when there is no such history.
+ */
+export function preQuitBaseline(profile: Profile | null, allHits: Hit[], windowDays = 30): Baseline {
+  const fallback: Baseline = { perDay: profile?.averagePuffsPerDay ?? 0, source: 'setting', days: 0 }
+  if (!profile) return fallback
+  const earliest = startOfDay(profile.journeyStart, -windowDays)
+  let first = Infinity
+  let count = 0
+  for (const h of allHits) {
+    if (h.deleted || h.kind === 'resisted' || h.ts >= profile.journeyStart || h.ts < earliest) continue
+    count++
+    if (h.ts < first) first = h.ts
+  }
+  if (!count) return fallback
+  // Whole days from the first recorded day to the quit day. Hits in the small hours of the quit day, before
+  // quitting, belong to the previous day's night, so they are counted without adding a day.
+  const days = daysBetween(first, profile.journeyStart)
+  return days >= 1 ? { perDay: count / days, source: 'history', days } : fallback
+}
+
+/** Hits a user would have taken since the journey began at their pre-quit rate, minus the ones they did take. */
+export function totalAvoided(profile: Profile | null, real: Hit[], now: number, perDay = profile?.averagePuffsPerDay ?? 0): number {
   if (!profile) return 0
   const days = (now - profile.journeyStart) / DAY_MS
-  return Math.floor(Math.max(0, profile.averagePuffsPerDay * days - real.length))
+  return Math.floor(Math.max(0, perDay * days - real.length))
 }
 
 /** Longest gap between hits (journey start counts as the first boundary, now as the last). */
@@ -103,7 +135,7 @@ export interface YesterdayComparison {
   avoidedToday: number
 }
 
-export function compareWithYesterday(hits: Hit[], stats: Map<string, DailyStats>, profile: Profile | null, now: number): YesterdayComparison {
+export function compareWithYesterday(hits: Hit[], stats: Map<string, DailyStats>, profile: Profile | null, now: number, perDay = profile?.averagePuffsPerDay ?? 0): YesterdayComparison {
   const yStart = startOfDay(now, -1)
   const yKey = dateKey(yStart)
   const cutoff = yStart + (now - startOfDay(now)) // same wall-clock time yesterday (ignores DST shifts)
@@ -113,7 +145,7 @@ export function compareWithYesterday(hits: Hit[], stats: Map<string, DailyStats>
   const todayStart = startOfDay(now)
   // On the day the journey starts, only count the part of the day after it started.
   const from = profile && dateKey(profile.journeyStart) === dateKey(now) ? profile.journeyStart : todayStart
-  const expected = (profile?.averagePuffsPerDay ?? 0) * ((now - from) / DAY_MS)
+  const expected = (profile ? perDay : 0) * ((now - from) / DAY_MS)
   const today = stats.get(dateKey(now))?.count ?? 0
   return {
     sameTimeYesterday,
@@ -172,6 +204,46 @@ export function nextLimitDrop(taper: Taper | null, now: number): number | null {
 export const costPerPuff = (cost: Cost | null): number | null =>
   cost && cost.puffsPerPod > 0 && cost.pricePerPod >= 0 ? cost.pricePerPod / cost.puffsPerPod : null
 
+export interface Savings {
+  /** Money saved since the journey start (hits avoided x cost per puff). */
+  total: number
+  /** What the pre-quit rate would have cost since the journey start, and what the hits taken did cost. */
+  wouldHaveSpent: number
+  spent: number
+  /** Pods or disposables not bought. */
+  pods: number
+  /** Saving rate over the last 7 days (or the journey so far if shorter), per day. */
+  perDayRecent: number
+  /** Cumulative savings at the end of each journey day (today counts up to now). */
+  daily: { date: string; saved: number }[]
+}
+
+export function savings(profile: Profile, real: Hit[], cost: Cost, perDay: number, now: number): Savings {
+  const perPuff = costPerPuff(cost) ?? 0
+  const start = profile.journeyStart
+  const avoided = totalAvoided(profile, real, now, perDay)
+  const wouldHaveSpent = perDay * Math.max(0, now - start) / DAY_MS * perPuff
+  const spent = countBetween(real, start) * perPuff
+
+  const recentFrom = Math.max(start, startOfDay(now, -6))
+  const recentDays = Math.max(1 / 24, (now - recentFrom) / DAY_MS)
+  const perDayRecent = Math.max(0, perDay * recentDays - countBetween(real, recentFrom)) / recentDays * perPuff
+
+  const daily: { date: string; saved: number }[] = []
+  const days = daysBetween(start, now)
+  const sorted = real.filter((h) => h.ts >= start).map((h) => h.ts).sort((a, b) => a - b)
+  let taken = 0
+  let i = 0
+  for (let d = 0; d <= days; d++) {
+    const end = Math.min(now, startOfDay(start, d + 1))
+    while (i < sorted.length && sorted[i] < end) { taken++; i++ }
+    const expected = perDay * Math.max(0, end - start) / DAY_MS
+    daily.push({ date: dateKey(startOfDay(start, d)), saved: Math.max(0, expected - taken) * perPuff })
+  }
+
+  return { total: avoided * perPuff, wouldHaveSpent, spent, pods: cost.puffsPerPod ? avoided / cost.puffsPerPod : 0, perDayRecent, daily }
+}
+
 export function formatMoney(amount: number): string {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: amount >= 1000 ? 0 : 2 })
 }
@@ -189,7 +261,7 @@ export interface WeekSummary {
 }
 
 /** Rolling 7 days (today and the 6 before) against the 7 days before that. */
-export function weekSummary(hits: Hit[], real: Hit[], wins: Hit[], profile: Profile | null, now: number): WeekSummary {
+export function weekSummary(hits: Hit[], real: Hit[], wins: Hit[], profile: Profile | null, now: number, perDay = profile?.averagePuffsPerDay ?? 0): WeekSummary {
   const thisStart = startOfDay(now, -6)
   const lastStart = startOfDay(now, -13)
   const thisWeek = countBetween(hits, thisStart)
@@ -197,7 +269,7 @@ export function weekSummary(hits: Hit[], real: Hit[], wins: Hit[], profile: Prof
   let avoidedThisWeek = 0
   if (profile) {
     const from = Math.max(thisStart, profile.journeyStart)
-    const expected = profile.averagePuffsPerDay * Math.max(0, now - from) / DAY_MS
+    const expected = perDay * Math.max(0, now - from) / DAY_MS
     avoidedThisWeek = Math.max(0, Math.floor(expected - countBetween(real, from)))
   }
   return {
@@ -283,24 +355,39 @@ export function formatHour(hour: number): string {
   return `${hour - 12}PM`
 }
 
+const minutesOf = (hhmm: string, fallback: number) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
+  return m ? (Number(m[1]) * 60 + Number(m[2])) % 1440 : fallback
+}
+
+/** Hits generated overnight per day: a few (about 3%, at most 5), none for very small averages. */
+export const overnightHits = (perDay: number) => (perDay < 2 ? 0 : Math.min(5, Math.max(1, Math.round(perDay * 0.03))))
+
 /**
- * 30 days of synthetic pre-quit history at the user's old average: ~10% overnight (mostly 6-8am wake-up hits),
- * the rest spread over 8am-midnight. IDs are per day and index, so redoing the backfill overwrites the same records.
+ * 30 days of synthetic pre-quit history at the user's old average. Each day's waking hours (wake-up time to bedtime)
+ * get evenly spread random hits, and the night that follows gets a few. IDs are per day and index, so redoing the
+ * backfill overwrites the same records. Nothing is generated at or after the quit time.
  */
-export function generateBackfill(quitAt: number, averagePuffsPerDay: number, now: number, random = Math.random): Hit[] {
+export function generateBackfill(quitAt: number, averagePuffsPerDay: number, now: number, random = Math.random, sleep: SleepWindow = { start: '01:00', end: '08:30' }): Hit[] {
   const hits: Hit[] = []
-  const sleep = Math.max(1, Math.round(averagePuffsPerDay * 0.1))
-  const wake = Math.max(0, averagePuffsPerDay - sleep)
+  const bed = minutesOf(sleep.start, 60)
+  const wake = minutesOf(sleep.end, 510)
+  const asleepMinutes = (wake - bed + 1440) % 1440
+  const awakeMinutes = 1440 - asleepMinutes
+  const night = asleepMinutes ? overnightHits(averagePuffsPerDay) : 0
+  const day = Math.max(0, averagePuffsPerDay - night)
+
   for (let d = 30; d >= 1; d--) {
-    const day = new Date(startOfDay(quitAt, -d))
-    const key = dateKey(day).replace(/-/g, '')
+    const date = new Date(startOfDay(quitAt, -d))
+    const key = dateKey(date).replace(/-/g, '')
     let i = 0
-    const push = (hour: number) => {
-      const ts = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, Math.floor(random() * 60), Math.floor(random() * 60)).getTime()
-      hits.push({ id: `bf-${key}-${i++}`, ts, backfill: true, updatedAt: now })
+    // Minutes from this day's midnight; values past 1440 land in the next day (Date normalises them).
+    const push = (minute: number) => {
+      const ts = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, Math.floor(minute), Math.floor(random() * 60)).getTime()
+      if (ts < quitAt) hits.push({ id: `bf-${key}-${i++}`, ts, backfill: true, updatedAt: now })
     }
-    for (let k = 0; k < sleep; k++) push(random() < 0.7 ? 6 + Math.floor(random() * 2) : Math.floor(random() * 3))
-    for (let k = 0; k < wake; k++) push(8 + Math.floor(random() * 16))
+    for (let k = 0; k < day; k++) push(wake + random() * awakeMinutes)
+    for (let k = 0; k < night; k++) push(wake + awakeMinutes + random() * asleepMinutes)
   }
   return hits
 }

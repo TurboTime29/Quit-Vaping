@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { generateBackfill } from '../lib/analytics'
-import { normalizeSettings, type Hit, type Profile, type ProfileSettings, type ThemeMode } from '../types'
+import { normalizeSettings, type Hit, type Profile, type ProfileSettings, type SleepWindow, type ThemeMode } from '../types'
 
 export interface NewHit {
   reason?: string
@@ -29,7 +29,8 @@ export interface DataState {
   recordHit: (hit?: NewHit) => string
   updateHit: (id: string, updates: Partial<Pick<Hit, 'ts' | 'reason' | 'note' | 'kind'>>) => void
   deleteHit: (id: string) => void
-  backfillHistory: () => void
+  /** Regenerates 30 days of pre-quit history around the given sleep window (remembered in settings). */
+  backfillHistory: (sleep?: SleepWindow) => void
   toggleTheme: () => void
   importBackup: (backup: Backup) => void
   /** Wipes journey, history and sync state on this device (keeps the theme). */
@@ -99,18 +100,19 @@ export const useData = create<DataState>()(
           dirtyHits: markDirty(s.dirtyHits, [id]),
         })),
 
-      backfillHistory: () =>
+      backfillHistory: (sleepWindow) =>
         set((s) => {
           if (!s.profile) return {}
           const now = Date.now()
-          const fresh = generateBackfill(s.profile.journeyStart, s.profile.averagePuffsPerDay, now)
+          const sleep = sleepWindow ?? s.profile.settings.sleep
+          const fresh = generateBackfill(s.profile.journeyStart, s.profile.averagePuffsPerDay, now, Math.random, sleep)
           const freshIds = new Set(fresh.map((h) => h.id))
           // Old backfill records not regenerated (different days or a lower average) become tombstones.
           const stale = s.hits.filter((h) => h.backfill && !h.deleted && !freshIds.has(h.id)).map((h) => ({ ...h, deleted: true, updatedAt: now }))
           const kept = s.hits.filter((h) => !h.backfill)
           return {
             hits: [...fresh, ...stale, ...kept],
-            profile: { ...s.profile, hasBackfilled: true, updatedAt: now },
+            profile: { ...s.profile, hasBackfilled: true, settings: { ...s.profile.settings, sleep }, updatedAt: now },
             dirtyProfile: true,
             dirtyHits: markDirty(s.dirtyHits, [...fresh, ...stale].map((h) => h.id)),
           }
@@ -135,10 +137,11 @@ export const useData = create<DataState>()(
     }),
     {
       name: 'quit-data',
-      version: 2,
+      // v2 added profile settings, v3 the sleep window: normalising fills in whatever an older save is missing.
+      version: 3,
       migrate: (persisted, version) => {
         const s = persisted as DataState
-        if (version < 2 && s.profile) s.profile = { ...s.profile, settings: normalizeSettings(s.profile.settings) }
+        if (version < 3 && s.profile) s.profile = { ...s.profile, settings: normalizeSettings(s.profile.settings) }
         return s
       },
       storage: createJSONStorage(() => ({

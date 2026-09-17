@@ -101,9 +101,9 @@ const NEXT_MODE: Record<YesterdayMode, YesterdayMode> = { sameTime: 'total', tot
 
 function StatsRow() {
   const now = useNow(60_000)
-  const { hits, stats, profile, wins } = useHitData()
+  const { hits, stats, profile, wins, baseline } = useHitData()
   const [mode, setMode] = useState<YesterdayMode>('sameTime')
-  const cmp = useMemo(() => compareWithYesterday(hits, stats, profile, now), [hits, stats, profile, now])
+  const cmp = useMemo(() => compareWithYesterday(hits, stats, profile, now, baseline.perDay), [hits, stats, profile, now, baseline.perDay])
   const today = stats.get(dateKey(now))?.count ?? 0
   const winsToday = countBetween(wins, startOfDay(now))
   const value = mode === 'sameTime' ? cmp.sameTimeYesterday : mode === 'total' ? cmp.totalYesterday : cmp.avoidedToday
@@ -242,11 +242,11 @@ function WeekCard() {
 
 function TotalsCard() {
   const now = useNow(1000)
-  const { profile, real, lastHit } = useHitData()
+  const { profile, real, lastHit, baseline } = useHitData()
   const since = lastHit ?? profile?.journeyStart ?? now
   // Longest completed gap only changes with the data; the running streak is added every second.
   const completed = useMemo(() => longestStreak(profile, real, since), [profile, real, since])
-  const avoided = totalAvoided(profile, real, now)
+  const avoided = totalAvoided(profile, real, now, baseline.perDay)
   const perPuff = costPerPuff(profile?.settings.cost ?? null)
   return (
     <div className="flex h-full flex-col justify-center">
@@ -265,12 +265,13 @@ function TotalsCard() {
         <span className="tabular mt-2 text-[40px] leading-tight font-bold">{formatStreak(Math.max(completed, now - since))}</span>
       </div>
       {perPuff !== null ? (
-        <div className="mt-3 flex items-baseline justify-center gap-2">
+        <Link to="/insights#savings" className="press mt-3 flex items-baseline justify-center gap-2">
           <span className="text-[10px] font-semibold tracking-wide text-muted">MONEY SAVED</span>
           <span className="tabular text-xl font-bold text-good">{formatMoney(avoided * perPuff)}</span>
-        </div>
+          <span className="text-xs text-muted">→</span>
+        </Link>
       ) : (
-        <Link to="/settings" className="press mt-3 text-center text-xs text-muted">Add what a pod costs to see money saved →</Link>
+        <Link to="/insights#savings" className="press mt-3 text-center text-xs text-muted">Add what a pod costs to see money saved →</Link>
       )}
     </div>
   )

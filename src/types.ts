@@ -53,8 +53,15 @@ export interface Reminders {
   milestones: boolean
 }
 
+/** Usual sleep, "HH:MM" local times, used to shape backfilled history. */
+export interface SleepWindow {
+  start: string
+  end: string
+}
+
 export interface ProfileSettings {
   reasons: string[]
+  sleep: SleepWindow
   taper: Taper | null
   cost: Cost | null
   reminders: Reminders
@@ -62,6 +69,7 @@ export interface ProfileSettings {
 
 export const DEFAULT_SETTINGS: ProfileSettings = {
   reasons: DEFAULT_REASONS,
+  sleep: { start: '01:00', end: '08:30' },
   taper: null,
   cost: null,
   reminders: { daily: null, milestones: false },
@@ -70,6 +78,7 @@ export const DEFAULT_SETTINGS: ProfileSettings = {
 export function normalizeSettings(s: Partial<ProfileSettings> | null | undefined): ProfileSettings {
   return {
     reasons: Array.isArray(s?.reasons) && s.reasons.length ? s.reasons : DEFAULT_REASONS,
+    sleep: s?.sleep?.start && s.sleep.end ? s.sleep : DEFAULT_SETTINGS.sleep,
     taper: s?.taper ?? null,
     cost: s?.cost ?? null,
     reminders: { ...DEFAULT_SETTINGS.reminders, ...(s?.reminders ?? {}) },

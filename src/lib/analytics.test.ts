@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, type Hit, type Profile } from '../types'
 import {
   DAY_MS, compareWithYesterday, costPerPuff, dailyLimit, dailyStats, dateKey, formatClock, formatStreak, generateBackfill, heatmap,
-  hourProfile, lastHitTime, lastNDays, longestStreak, nextLimitDrop, parseDateKey, realHits, reasonBreakdown, reasonStats, topHours,
+  hourProfile, lastHitTime, lastNDays, longestStreak, nextLimitDrop, parseDateKey, preQuitBaseline, realHits, reasonBreakdown, reasonStats, savings, topHours,
   totalAvoided, visibleHits, weekSummary, weekdayAverages,
 } from './analytics'
 import { healthProgress } from './health'
@@ -80,10 +80,69 @@ describe('backfill', () => {
     const quit = at(2026, 9, 17, 15)
     const a = generateBackfill(quit, 20, 0)
     expect(a).toHaveLength(30 * 20)
-    expect(Math.max(...a.map((h) => h.ts))).toBeLessThan(at(2026, 9, 17))
-    expect(Math.min(...a.map((h) => h.ts))).toBeGreaterThanOrEqual(at(2026, 8, 18))
+    expect(Math.max(...a.map((h) => h.ts))).toBeLessThan(quit)
+    expect(Math.min(...a.map((h) => h.ts))).toBeGreaterThanOrEqual(at(2026, 8, 18, 8, 30))
     expect(new Set(a.map((h) => h.id)).size).toBe(a.length)
     expect(generateBackfill(quit, 20, 0).map((h) => h.id)).toEqual(a.map((h) => h.id))
+  })
+
+  it('keeps most hits in waking hours and only a few overnight (asleep 1:00 to 8:30)', () => {
+    const quit = at(2026, 9, 17, 15)
+    const a = generateBackfill(quit, 300, 0, Math.random, { start: '01:00', end: '08:30' })
+    const minuteOfDay = (ts: number) => { const d = new Date(ts); return d.getHours() * 60 + d.getMinutes() }
+    const overnight = a.filter((h) => { const m = minuteOfDay(h.ts); return m >= 60 && m < 510 })
+    expect(a).toHaveLength(30 * 300)
+    expect(overnight).toHaveLength(30 * 5) // "a few": 3% of 300 is 9, capped at 5 a night
+    // Waking hits are spread across the whole 16.5 hours, including after midnight.
+    const awake = a.filter((h) => !overnight.includes(h)).map((h) => minuteOfDay(h.ts))
+    expect(awake.some((m) => m < 60)).toBe(true)
+    expect(awake.some((m) => m >= 510 && m < 600)).toBe(true)
+    expect(awake.some((m) => m >= 1380)).toBe(true)
+    // Daily counts line up with the average.
+    const perDay = dailyStats(a)
+    expect(perDay.get('2026-09-10')!.count).toBeGreaterThan(280)
+    expect(perDay.get('2026-09-10')!.count).toBeLessThan(320)
+  })
+
+  it('handles a bedtime before midnight and tiny averages', () => {
+    const quit = at(2026, 9, 17, 15)
+    const a = generateBackfill(quit, 1, 0, Math.random, { start: '23:00', end: '07:00' })
+    expect(a).toHaveLength(30)
+    for (const h of a) { const hr = new Date(h.ts).getHours(); expect(hr >= 7 && hr < 23).toBe(true) }
+  })
+})
+
+describe('pre-quit baseline and savings', () => {
+  const quit = at(2026, 9, 17, 15)
+  const p = profile(quit, 100)
+
+  it('measures avoided hits against backfilled history, ignoring wins and deleted records', () => {
+    const backfill = generateBackfill(quit, 40, 0)
+    const extras = [hit('win', quit - 3600_000, { kind: 'resisted' }), hit('gone', quit - 7200_000, { deleted: true })]
+    const b = preQuitBaseline(p, [...backfill, ...extras])
+    expect(b.source).toBe('history')
+    expect(b.days).toBe(30)
+    expect(b.perDay).toBeCloseTo(40)
+    const now = quit + 2 * DAY_MS
+    const real = [hit('r1', quit + 3600_000), hit('r2', quit + DAY_MS)]
+    expect(totalAvoided(p, real, now, b.perDay)).toBe(78) // 40 * 2 - 2, not 100 * 2 - 2
+  })
+
+  it('falls back to the Average Puffs setting without pre-quit history', () => {
+    expect(preQuitBaseline(p, [hit('after', quit + 1000)])).toEqual({ perDay: 100, source: 'setting', days: 0 })
+  })
+
+  it('adds up money saved, spent and pods', () => {
+    const now = quit + 2 * DAY_MS
+    const real = [hit('r1', quit + 3600_000), hit('r2', quit + DAY_MS)]
+    const s = savings(p, real, { pricePerPod: 20, puffsPerPod: 1000 }, 40, now)
+    expect(s.total).toBeCloseTo(78 * 0.02)
+    expect(s.wouldHaveSpent).toBeCloseTo(80 * 0.02)
+    expect(s.spent).toBeCloseTo(2 * 0.02)
+    expect(s.pods).toBeCloseTo(0.078)
+    expect(s.daily.at(-1)!.saved).toBeCloseTo(78 * 0.02)
+    expect(s.daily[0].saved).toBeGreaterThan(0)
+    expect(s.perDayRecent).toBeCloseTo(39 * 0.02)
   })
 })
 
