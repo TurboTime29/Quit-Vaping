@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#000"/>
+  <text x="256" y="262" text-anchor="middle" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="150" fill="#fff">Quit<tspan fill="#FF6B6B">.</tspan></text>
+  <text x="256" y="340" text-anchor="middle" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-weight="400" font-size="46" fill="#999">Do The Thing</text>
+</svg>

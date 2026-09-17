@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Palette carried over from the original app. */
+:root {
+  --bg: #ffffff;
+  --card: #f5f5f5;
+  --text: #000000;
+  --muted: #666666;
+  --border: #e5e5e5;
+  --chip: #e0e0e0;
+  color-scheme: light;
+}
+.dark {
+  --bg: #000000;
+  --card: #1a1a1a;
+  --text: #ffffff;
+  --muted: #999999;
+  --border: #2a2a2a;
+  --chip: #333333;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-chip: var(--chip);
+  --color-accent: #ff6b6b;
+  --color-good: #4caf50;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+/* Feel like an app, not a web page: no text selection or iOS callout on controls, no double-tap zoom. */
+button,
+a,
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* iOS zooms into inputs with a font size under 16px. */
+input,
+select,
+textarea {
+  font-size: max(16px, 1em);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.press {
+  transition: opacity 120ms, transform 120ms;
+}
+.press:active {
+  opacity: 0.7;
+  transform: scale(0.98);
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sheet-up {
+  animation: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.fade-in {
+  animation: fade-in 160ms ease-out;
+}
