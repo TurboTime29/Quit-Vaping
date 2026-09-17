@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from './Icons'
 
-export default function PageHeader({ title }: { title: string }) {
+export default function PageHeader({ title, action }: { title: string; action?: ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
   // Opened directly from a bookmark there is no in-app history to go back to.
@@ -12,7 +13,7 @@ export default function PageHeader({ title }: { title: string }) {
         <ArrowLeft size={24} />
       </button>
       <h1 className="text-xl font-bold">{title}</h1>
-      <div className="size-10" />
+      {action ?? <div className="size-10" />}
     </header>
   )
 }

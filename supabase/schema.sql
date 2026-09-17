@@ -1,5 +1,6 @@
 -- Quit. cloud sync schema.
 -- Run once in Supabase: Dashboard → SQL Editor → New query → paste → Run. Safe to re-run.
+-- Fresh project: run this file, then migrations/002_features.sql (and 003 once reminders are deployed).
 -- Tables are prefixed quit_ so this can share a Supabase project with other apps.
 
 create table if not exists public.quit_profiles (
@@ -15,7 +16,7 @@ create table if not exists public.quit_hits (
   user_id uuid not null references auth.users (id) on delete cascade,
   id text not null,
   ts timestamptz not null,
-  reason text check (reason in ('Stress', 'Habit', 'Focus', 'Bored', 'Other')),
+  reason text,
   backfill boolean not null default false,
   deleted boolean not null default false,           -- tombstone so deletions reach other devices
   updated_at bigint not null,

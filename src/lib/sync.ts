@@ -115,6 +115,24 @@ export async function signOut() {
   await supabase?.auth.signOut()
 }
 
+/** Removes this user's Quit. data from the cloud (profile, history, reminders) and this device, then signs out. The login stays. */
+export async function deleteCloudData() {
+  if (!supabase) throw new Error('Cloud sync is not configured')
+  const { error } = await supabase.rpc('quit_delete_my_data')
+  if (error) throw error
+  useData.getState().eraseLocal() // before signing out, so nothing on this device is pushed back up
+  await supabase.auth.signOut()
+}
+
+/** Deletes the login and, through cascading deletes, every row that belongs to it in this Supabase project. */
+export async function deleteAccount() {
+  if (!supabase) throw new Error('Cloud sync is not configured')
+  const { error } = await supabase.rpc('quit_delete_account')
+  if (error) throw error
+  useData.getState().eraseLocal()
+  await supabase.auth.signOut({ scope: 'local' })
+}
+
 // ---------------------------------------------------------------- sync engine
 
 const PAGE = 1000
@@ -189,7 +207,8 @@ export async function syncNow(): Promise<void> {
     setStatus('synced')
   } catch (e) {
     const msg = (e as Error).message ?? String(e)
-    setStatus(/fetch|network/i.test(msg) ? 'offline' : 'error', msg)
+    if (/schema cache|column .* does not exist|Could not find the .* column/i.test(msg)) setStatus('error', `The database needs updating: run supabase/migrations/002_features.sql in the Supabase SQL Editor. (${msg})`)
+    else setStatus(/fetch|network/i.test(msg) ? 'offline' : 'error', msg)
   } finally {
     running = false
     if (again) { again = false; void syncNow() }

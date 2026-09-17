@@ -31,7 +31,11 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,png,svg,ico}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,png,svg,ico}'],
+        // Push and notification-click handlers for reminders.
+        importScripts: ['push-handler.js'],
+      },
     }),
   ],
   test: {

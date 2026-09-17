@@ -3,8 +3,10 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { DialogHost } from './components/Dialogs'
 import { useAutoSync } from './lib/sync'
 import { useData } from './store/data'
+import Craving from './pages/Craving'
 import History from './pages/History'
 import Home from './pages/Home'
+import Insights from './pages/Insights'
 import Onboarding from './pages/Onboarding'
 import Settings from './pages/Settings'
 
@@ -15,10 +17,15 @@ function RequireProfile({ children }: { children: ReactNode }) {
 
 export default function App() {
   const theme = useData((s) => s.theme)
-  const { pathname } = useLocation()
+  const { pathname, hash } = useLocation()
   useAutoSync()
 
-  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  // New page: start at the top, or at the #section a link points to.
+  useEffect(() => {
+    const target = hash ? document.getElementById(hash.slice(1)) : null
+    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth' }), 50)
+    else window.scrollTo(0, 0)
+  }, [pathname, hash])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -31,6 +38,8 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/" element={<RequireProfile><Home /></RequireProfile>} />
         <Route path="/history" element={<RequireProfile><History /></RequireProfile>} />
+        <Route path="/insights" element={<RequireProfile><Insights /></RequireProfile>} />
+        <Route path="/craving" element={<RequireProfile><Craving /></RequireProfile>} />
         <Route path="/settings" element={<RequireProfile><Settings /></RequireProfile>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

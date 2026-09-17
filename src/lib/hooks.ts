@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../store/data'
-import { dailyStats, lastHitTime, realHits, visibleHits } from './analytics'
+import { dailyStats, lastHitTime, onlyHits, onlyWins, realHits, visibleHits } from './analytics'
 
 /** Current time, refreshed every `ms` (aligned to the wall clock so seconds tick together). */
 export function useNow(ms = 1000) {
@@ -28,8 +28,13 @@ export function useHitData() {
   const hits = useData((s) => s.hits)
   const profile = useData((s) => s.profile)
   return useMemo(() => {
+    /** Every record shown in History: hits (including backfill) and resisted cravings. */
     const visible = visibleHits(hits, profile)
-    const real = realHits(visible)
-    return { profile, visible, real, stats: dailyStats(visible), lastHit: lastHitTime(real) }
+    /** Hits only (including backfill): charts and daily counts. */
+    const hitList = onlyHits(visible)
+    /** Hits the user logged: streaks, totals, avoided. */
+    const real = realHits(hitList)
+    const wins = onlyWins(visible)
+    return { profile, visible, hits: hitList, real, wins, stats: dailyStats(hitList), lastHit: lastHitTime(real) }
   }, [hits, profile])
 }

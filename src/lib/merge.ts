@@ -1,4 +1,4 @@
-import type { Hit, HitReason, Profile } from '../types'
+import { normalizeSettings, type Hit, type Profile, type ProfileSettings } from '../types'
 import type { DataState } from '../store/data'
 
 export interface ProfileRow {
@@ -6,6 +6,7 @@ export interface ProfileRow {
   average_puffs_per_day: number
   journey_start: string
   has_backfilled: boolean
+  settings: ProfileSettings
   updated_at: number
   server_at?: string
 }
@@ -14,7 +15,9 @@ export interface HitRow {
   user_id: string
   id: string
   ts: string
-  reason: HitReason | null
+  reason: string | null
+  note: string | null
+  kind: 'hit' | 'resisted'
   backfill: boolean
   deleted: boolean
   updated_at: number
@@ -26,6 +29,7 @@ export const profileToRow = (userId: string, p: Profile): ProfileRow => ({
   average_puffs_per_day: p.averagePuffsPerDay,
   journey_start: new Date(p.journeyStart).toISOString(),
   has_backfilled: p.hasBackfilled,
+  settings: p.settings,
   updated_at: p.updatedAt,
 })
 
@@ -33,6 +37,7 @@ export const rowToProfile = (r: ProfileRow): Profile => ({
   averagePuffsPerDay: r.average_puffs_per_day,
   journeyStart: Date.parse(r.journey_start),
   hasBackfilled: r.has_backfilled,
+  settings: normalizeSettings(r.settings),
   updatedAt: Number(r.updated_at),
 })
 
@@ -41,6 +46,8 @@ export const hitToRow = (userId: string, h: Hit): HitRow => ({
   id: h.id,
   ts: new Date(h.ts).toISOString(),
   reason: h.reason ?? null,
+  note: h.note ?? null,
+  kind: h.kind ?? 'hit',
   backfill: !!h.backfill,
   deleted: !!h.deleted,
   updated_at: h.updatedAt,
@@ -49,6 +56,8 @@ export const hitToRow = (userId: string, h: Hit): HitRow => ({
 export const rowToHit = (r: HitRow): Hit => {
   const h: Hit = { id: r.id, ts: Date.parse(r.ts), updatedAt: Number(r.updated_at) }
   if (r.reason) h.reason = r.reason
+  if (r.note) h.note = r.note
+  if (r.kind === 'resisted') h.kind = 'resisted'
   if (r.backfill) h.backfill = true
   if (r.deleted) h.deleted = true
   return h

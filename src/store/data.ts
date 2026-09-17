@@ -1,7 +1,15 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { generateBackfill } from '../lib/analytics'
-import type { Hit, HitReason, Profile, ThemeMode } from '../types'
+import { normalizeSettings, type Hit, type Profile, type ProfileSettings, type ThemeMode } from '../types'
+
+export interface NewHit {
+  reason?: string
+  note?: string
+  kind?: 'resisted'
+  /** Defaults to now (for logging a missed hit earlier). */
+  ts?: number
+}
 
 export interface DataState {
   profile: Profile | null
@@ -16,12 +24,16 @@ export interface DataState {
 
   startJourney: (averagePuffsPerDay: number) => void
   updateProfile: (updates: Partial<Pick<Profile, 'averagePuffsPerDay' | 'journeyStart'>>) => void
-  recordHit: (reason?: HitReason) => void
-  updateHit: (id: string, updates: { ts?: number; reason?: HitReason }) => void
+  updateSettings: (updates: Partial<ProfileSettings>) => void
+  /** Logs a hit or resisted craving and returns its id (for undo). */
+  recordHit: (hit?: NewHit) => string
+  updateHit: (id: string, updates: Partial<Pick<Hit, 'ts' | 'reason' | 'note' | 'kind'>>) => void
   deleteHit: (id: string) => void
   backfillHistory: () => void
   toggleTheme: () => void
   importBackup: (backup: Backup) => void
+  /** Wipes journey, history and sync state on this device (keeps the theme). */
+  eraseLocal: () => void
 }
 
 export interface Backup {
@@ -40,6 +52,15 @@ const markDirty = (dirty: Record<string, true>, ids: Iterable<string>) => {
   return next
 }
 
+const clean = (h: Hit): Hit => {
+  // Drop empty optional fields so records stay small and compare equal after a round trip.
+  const out = { ...h }
+  if (!out.reason) delete out.reason
+  if (!out.note?.trim()) delete out.note
+  if (!out.kind) delete out.kind
+  return out
+}
+
 export const useData = create<DataState>()(
   persist(
     (set) => ({
@@ -51,21 +72,24 @@ export const useData = create<DataState>()(
       cursor: null,
 
       startJourney: (averagePuffsPerDay) =>
-        set({ profile: { averagePuffsPerDay, journeyStart: Date.now(), hasBackfilled: false, updatedAt: Date.now() }, dirtyProfile: true }),
+        set({ profile: { averagePuffsPerDay, journeyStart: Date.now(), hasBackfilled: false, settings: normalizeSettings(null), updatedAt: Date.now() }, dirtyProfile: true }),
 
       updateProfile: (updates) =>
         set((s) => (s.profile ? { profile: { ...s.profile, ...updates, updatedAt: Date.now() }, dirtyProfile: true } : {})),
 
-      recordHit: (reason) =>
-        set((s) => {
-          const now = Date.now()
-          const hit: Hit = { id: newId(), ts: now, reason, updatedAt: now }
-          return { hits: [...s.hits, hit], dirtyHits: markDirty(s.dirtyHits, [hit.id]) }
-        }),
+      updateSettings: (updates) =>
+        set((s) => (s.profile ? { profile: { ...s.profile, settings: { ...s.profile.settings, ...updates }, updatedAt: Date.now() }, dirtyProfile: true } : {})),
+
+      recordHit: (input = {}) => {
+        const now = Date.now()
+        const hit = clean({ id: newId(), ts: input.ts ?? now, reason: input.reason, note: input.note?.trim(), kind: input.kind, updatedAt: now })
+        set((s) => ({ hits: [...s.hits, hit], dirtyHits: markDirty(s.dirtyHits, [hit.id]) }))
+        return hit.id
+      },
 
       updateHit: (id, updates) =>
         set((s) => ({
-          hits: s.hits.map((h) => (h.id === id ? { ...h, ...updates, updatedAt: Date.now() } : h)),
+          hits: s.hits.map((h) => (h.id === id ? clean({ ...h, ...updates, updatedAt: Date.now() }) : h)),
           dirtyHits: markDirty(s.dirtyHits, [id]),
         })),
 
@@ -84,9 +108,8 @@ export const useData = create<DataState>()(
           // Old backfill records not regenerated (different days or a lower average) become tombstones.
           const stale = s.hits.filter((h) => h.backfill && !h.deleted && !freshIds.has(h.id)).map((h) => ({ ...h, deleted: true, updatedAt: now }))
           const kept = s.hits.filter((h) => !h.backfill)
-          const hits = [...fresh, ...stale, ...kept]
           return {
-            hits,
+            hits: [...fresh, ...stale, ...kept],
             profile: { ...s.profile, hasBackfilled: true, updatedAt: now },
             dirtyProfile: true,
             dirtyHits: markDirty(s.dirtyHits, [...fresh, ...stale].map((h) => h.id)),
@@ -101,16 +124,23 @@ export const useData = create<DataState>()(
           const byId = new Map(s.hits.map((h) => [h.id, h]))
           for (const h of b.hits) byId.set(h.id, { ...h, updatedAt: now })
           return {
-            profile: b.profile ? { ...b.profile, updatedAt: now } : s.profile,
+            profile: b.profile ? { ...b.profile, settings: normalizeSettings(b.profile.settings), updatedAt: now } : s.profile,
             hits: [...byId.values()],
             dirtyProfile: !!b.profile || s.dirtyProfile,
             dirtyHits: markDirty(s.dirtyHits, b.hits.map((h) => h.id)),
           }
         }),
+
+      eraseLocal: () => set({ profile: null, hits: [], dirtyProfile: false, dirtyHits: {}, cursor: null }),
     }),
     {
       name: 'quit-data',
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const s = persisted as DataState
+        if (version < 2 && s.profile) s.profile = { ...s.profile, settings: normalizeSettings(s.profile.settings) }
+        return s
+      },
       storage: createJSONStorage(() => ({
         getItem: (name) => {
           const raw = localStorage.getItem(name)

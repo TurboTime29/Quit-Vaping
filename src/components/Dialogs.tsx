@@ -11,8 +11,10 @@ interface ConfirmRequest {
 
 interface DialogState {
   confirm: ConfirmRequest | null
-  toast: { text: string; id: number } | null
+  toast: { text: string; id: number; action?: ToastAction; duration: number } | null
 }
+
+interface ToastAction { label: string; run: () => void }
 
 const useDialogs = create<DialogState>(() => ({ confirm: null, toast: null }))
 
@@ -21,8 +23,8 @@ export function confirmDialog(opts: Omit<ConfirmRequest, 'resolve'>): Promise<bo
   return new Promise((resolve) => useDialogs.setState({ confirm: { ...opts, resolve } }))
 }
 
-export function toast(text: string) {
-  useDialogs.setState({ toast: { text, id: Date.now() } })
+export function toast(text: string, opts: { action?: ToastAction; duration?: number } = {}) {
+  useDialogs.setState({ toast: { text, id: Date.now(), action: opts.action, duration: opts.duration ?? (opts.action ? 6000 : 2200) } })
 }
 
 export function DialogHost() {
@@ -30,7 +32,7 @@ export function DialogHost() {
 
   useEffect(() => {
     if (!t) return
-    const timer = setTimeout(() => useDialogs.setState({ toast: null }), 2200)
+    const timer = setTimeout(() => useDialogs.setState({ toast: null }), t.duration)
     return () => clearTimeout(timer)
   }, [t])
 
@@ -68,7 +70,14 @@ export function DialogHost() {
       )}
       {t && (
         <div key={t.id} className="fade-in pointer-events-none fixed inset-x-0 z-50 flex justify-center px-6" style={{ bottom: 'calc(env(safe-area-inset-bottom) + 24px)' }}>
-          <div role="status" className="rounded-full bg-fg px-5 py-3 text-sm font-semibold text-bg shadow-lg">{t.text}</div>
+          <div role="status" className="pointer-events-auto flex items-center gap-4 rounded-full bg-fg py-3 pr-3 pl-5 text-sm font-semibold text-bg shadow-lg">
+            <span className={t.action ? '' : 'pr-2'}>{t.text}</span>
+            {t.action && (
+              <button className="press rounded-full bg-accent px-4 py-1.5 text-white" onClick={() => { t.action!.run(); useDialogs.setState({ toast: null }) }}>
+                {t.action.label}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </>

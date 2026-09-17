@@ -24,4 +24,7 @@ export const Settings = (p: P) => (
     <circle cx="12" cy="12" r="3" />
   </Icon>
 )
-export const Cloud = (p: P) => <Icon {...p}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /></Icon>
+export const BarChart = (p: P) => <Icon {...p}><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></Icon>
+export const Plus = (p: P) => <Icon {...p}><path d="M5 12h14" /><path d="M12 5v14" /></Icon>
+export const ChevronUp = (p: P) => <Icon {...p}><path d="m18 15-6-6-6 6" /></Icon>
+export const ChevronDown = (p: P) => <Icon {...p}><path d="m6 9 6 6 6-6" /></Icon>
