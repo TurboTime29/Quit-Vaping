@@ -412,7 +412,7 @@ function BackfillSheet({ onClose }: { onClose: () => void }) {
   return (
     <Sheet title={profile.hasBackfilled ? 'Redo backfill' : 'Backfill history'} onClose={onClose}>
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Generates the 30 days before you quit ({new Date(profile.journeyStart - 30 * 864e5).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} to {quit.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}) at your average of <b className="text-fg">{avg} hits a day</b>, so charts have a before picture and savings use real numbers. Your streak isn’t affected.
+        Fills in history from {new Date(startOfDay(profile.journeyStart, -30)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} right up to the minute before you quit ({quit.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, {quit.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}), at your average of <b className="text-fg">{avg} hits a day</b>, so charts have a before picture and savings use real numbers. Your streak isn’t affected.
       </p>
       <div className="mb-4 grid grid-cols-2 gap-3">
         <div><label className={labelClass} htmlFor="bf-bed">Asleep from</label><input id="bf-bed" type="time" className={field} value={bed} onChange={(e) => setBed(e.target.value)} /></div>

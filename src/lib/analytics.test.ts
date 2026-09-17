@@ -76,14 +76,17 @@ describe('stats', () => {
 })
 
 describe('backfill', () => {
-  it('generates 30 days before the quit date with stable ids', () => {
-    const quit = at(2026, 9, 17, 15)
-    const a = generateBackfill(quit, 20, 0)
-    expect(a).toHaveLength(30 * 20)
-    expect(Math.max(...a.map((h) => h.ts))).toBeLessThan(quit)
-    expect(Math.min(...a.map((h) => h.ts))).toBeGreaterThanOrEqual(at(2026, 8, 18, 8, 30))
+  it('covers the 30 days before quitting and the quit day up to the minute before, with stable ids', () => {
+    const quit = at(2026, 9, 17, 15, 4)
+    const seeded = () => { let x = 42; return () => ((x = (x * 16807) % 2147483647) / 2147483647) }
+    const a = generateBackfill(quit, 20, 0, seeded())
+    const stats = dailyStats(a)
+    expect(Math.max(...a.map((h) => h.ts))).toBe(quit - 60_000)
+    expect(Math.min(...a.map((h) => h.ts))).toBeGreaterThanOrEqual(at(2026, 8, 18))
+    expect(stats.get('2026-08-17')).toBeUndefined()
+    expect(stats.get('2026-09-17')!.count).toBeGreaterThan(5) // quit morning and early afternoon
     expect(new Set(a.map((h) => h.id)).size).toBe(a.length)
-    expect(generateBackfill(quit, 20, 0).map((h) => h.id)).toEqual(a.map((h) => h.id))
+    expect(generateBackfill(quit, 20, 0, seeded()).map((h) => h.id)).toEqual(a.map((h) => h.id))
   })
 
   it('keeps most hits in waking hours and only a few overnight (asleep 1:00 to 8:30)', () => {
@@ -91,8 +94,7 @@ describe('backfill', () => {
     const a = generateBackfill(quit, 300, 0, Math.random, { start: '01:00', end: '08:30' })
     const minuteOfDay = (ts: number) => { const d = new Date(ts); return d.getHours() * 60 + d.getMinutes() }
     const overnight = a.filter((h) => { const m = minuteOfDay(h.ts); return m >= 60 && m < 510 })
-    expect(a).toHaveLength(30 * 300)
-    expect(overnight).toHaveLength(30 * 5) // "a few": 3% of 300 is 9, capped at 5 a night
+    expect(overnight).toHaveLength(31 * 5) // "a few" (3% of 300 is 9, capped at 5) for each of the 31 nights
     // Waking hits are spread across the whole 16.5 hours, including after midnight.
     const awake = a.filter((h) => !overnight.includes(h)).map((h) => minuteOfDay(h.ts))
     expect(awake.some((m) => m < 60)).toBe(true)
@@ -107,7 +109,8 @@ describe('backfill', () => {
   it('handles a bedtime before midnight and tiny averages', () => {
     const quit = at(2026, 9, 17, 15)
     const a = generateBackfill(quit, 1, 0, Math.random, { start: '23:00', end: '07:00' })
-    expect(a).toHaveLength(30)
+    expect(a.length).toBeGreaterThanOrEqual(30)
+    expect(a.length).toBeLessThanOrEqual(31)
     for (const h of a) { const hr = new Date(h.ts).getHours(); expect(hr >= 7 && hr < 23).toBe(true) }
   })
 })
@@ -122,10 +125,11 @@ describe('pre-quit baseline and savings', () => {
     const b = preQuitBaseline(p, [...backfill, ...extras])
     expect(b.source).toBe('history')
     expect(b.days).toBe(30)
-    expect(b.perDay).toBeCloseTo(40)
+    expect(b.perDay).toBeGreaterThan(38) // each full day averages 40; the partial quit day is left out
+    expect(b.perDay).toBeLessThan(42)
     const now = quit + 2 * DAY_MS
     const real = [hit('r1', quit + 3600_000), hit('r2', quit + DAY_MS)]
-    expect(totalAvoided(p, real, now, b.perDay)).toBe(78) // 40 * 2 - 2, not 100 * 2 - 2
+    expect(totalAvoided(p, real, now, 40)).toBe(78) // 40 * 2 - 2, not 100 * 2 - 2
   })
 
   it('falls back to the Average Puffs setting without pre-quit history', () => {

@@ -94,18 +94,18 @@ export interface Baseline {
 export function preQuitBaseline(profile: Profile | null, allHits: Hit[], windowDays = 30): Baseline {
   const fallback: Baseline = { perDay: profile?.averagePuffsPerDay ?? 0, source: 'setting', days: 0 }
   if (!profile) return fallback
+  // Whole calendar days only: the quit day is partial (hits stop when the journey starts), so it would skew the rate.
+  const end = startOfDay(profile.journeyStart)
   const earliest = startOfDay(profile.journeyStart, -windowDays)
   let first = Infinity
   let count = 0
   for (const h of allHits) {
-    if (h.deleted || h.kind === 'resisted' || h.ts >= profile.journeyStart || h.ts < earliest) continue
+    if (h.deleted || h.kind === 'resisted' || h.ts >= end || h.ts < earliest) continue
     count++
     if (h.ts < first) first = h.ts
   }
   if (!count) return fallback
-  // Whole days from the first recorded day to the quit day. Hits in the small hours of the quit day, before
-  // quitting, belong to the previous day's night, so they are counted without adding a day.
-  const days = daysBetween(first, profile.journeyStart)
+  const days = daysBetween(first, end)
   return days >= 1 ? { perDay: count / days, source: 'history', days } : fallback
 }
 
@@ -146,7 +146,8 @@ export function compareWithYesterday(hits: Hit[], stats: Map<string, DailyStats>
   // On the day the journey starts, only count the part of the day after it started.
   const from = profile && dateKey(profile.journeyStart) === dateKey(now) ? profile.journeyStart : todayStart
   const expected = (profile ? perDay : 0) * ((now - from) / DAY_MS)
-  const today = stats.get(dateKey(now))?.count ?? 0
+  // Only hits since `from`: on the quit day, backfilled hits from before quitting are not "taken" on the journey.
+  const today = countBetween(hits, from)
   return {
     sameTimeYesterday,
     totalYesterday: stats.get(yKey)?.count ?? 0,
@@ -364,9 +365,10 @@ const minutesOf = (hhmm: string, fallback: number) => {
 export const overnightHits = (perDay: number) => (perDay < 2 ? 0 : Math.min(5, Math.max(1, Math.round(perDay * 0.03))))
 
 /**
- * 30 days of synthetic pre-quit history at the user's old average. Each day's waking hours (wake-up time to bedtime)
+ * Synthetic pre-quit history at the user's old average: the 30 full days before the quit day, plus the quit day itself
+ * up to the minute before quitting (where the last hit is placed). Each day's waking hours (wake-up time to bedtime)
  * get evenly spread random hits, and the night that follows gets a few. IDs are per day and index, so redoing the
- * backfill overwrites the same records. Nothing is generated at or after the quit time.
+ * backfill overwrites the same records.
  */
 export function generateBackfill(quitAt: number, averagePuffsPerDay: number, now: number, random = Math.random, sleep: SleepWindow = { start: '01:00', end: '08:30' }): Hit[] {
   const hits: Hit[] = []
@@ -377,17 +379,25 @@ export function generateBackfill(quitAt: number, averagePuffsPerDay: number, now
   const night = asleepMinutes ? overnightHits(averagePuffsPerDay) : 0
   const day = Math.max(0, averagePuffsPerDay - night)
 
-  for (let d = 30; d >= 1; d--) {
+  const from = startOfDay(quitAt, -30)
+  const until = quitAt - 60_000
+  // Day 31 before only contributes its after-midnight hits (so the first calendar day is complete); the quit day
+  // is generated in full and cut off at the minute before quitting.
+  for (let d = 31; d >= 0; d--) {
     const date = new Date(startOfDay(quitAt, -d))
     const key = dateKey(date).replace(/-/g, '')
     let i = 0
     // Minutes from this day's midnight; values past 1440 land in the next day (Date normalises them).
     const push = (minute: number) => {
       const ts = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, Math.floor(minute), Math.floor(random() * 60)).getTime()
-      if (ts < quitAt) hits.push({ id: `bf-${key}-${i++}`, ts, backfill: true, updatedAt: now })
+      if (ts >= from && ts <= until) hits.push({ id: `bf-${key}-${i++}`, ts, backfill: true, updatedAt: now })
     }
     for (let k = 0; k < day; k++) push(wake + random() * awakeMinutes)
     for (let k = 0; k < night; k++) push(wake + awakeMinutes + random() * asleepMinutes)
   }
+  // The last hit before quitting happens the minute before the journey starts.
+  let last = -1
+  hits.forEach((h, i) => { if (last < 0 || h.ts > hits[last].ts) last = i })
+  if (last >= 0) hits[last] = { ...hits[last], ts: until }
   return hits
 }
