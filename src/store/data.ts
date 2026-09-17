@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import { generateBackfill } from '../lib/analytics'
 import type { Hit, HitReason, Profile, ThemeMode } from '../types'
 
@@ -108,7 +108,20 @@ export const useData = create<DataState>()(
           }
         }),
     }),
-    { name: 'quit-data', version: 1 },
+    {
+      name: 'quit-data',
+      version: 1,
+      storage: createJSONStorage(() => ({
+        getItem: (name) => {
+          const raw = localStorage.getItem(name)
+          // Never silently lose history: keep an unreadable copy aside before the app starts fresh over it.
+          if (raw) try { JSON.parse(raw) } catch { localStorage.setItem(`${name}-unreadable-${Date.now()}`, raw) }
+          return raw
+        },
+        setItem: (name, value) => localStorage.setItem(name, value),
+        removeItem: (name) => localStorage.removeItem(name),
+      })),
+    },
   ),
 )
 
